@@ -1,0 +1,5 @@
+﻿Competition ID,Error,Failed UTC
+8968,'str' object has no attribute 'get',2026-07-31T08:30:10+00:00
+9138,'str' object has no attribute 'get',2026-07-31T08:30:12+00:00
+8968,'str' object has no attribute 'get',2026-07-31T10:37:15+00:00
+9138,'str' object has no attribute 'get',2026-07-31T10:37:16+00:00

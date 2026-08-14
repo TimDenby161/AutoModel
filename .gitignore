@@ -1,0 +1,6 @@
+# Google service account credential - never commit this
+service_account.json
+
+# Python
+__pycache__/
+*.pyc
