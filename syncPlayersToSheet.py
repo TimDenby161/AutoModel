@@ -63,11 +63,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,9 @@ MATCHES_WORKSHEET = "Matches"
 MATCHES_HEADER_ROW = 1
 MATCHES_DATA_START_ROW = 2
 MATCHES_LAST_FORMULA_COLUMN = "Q"  # every column B..Q looks up MatchData by ID
+
+INDIVIDUAL_RESULTS_SPREADSHEET_ID = "1y2L7pOfIHqBMQCYsMy3g1Cm1iHCl3aR6onIpMWzWa1A"
+INDIVIDUAL_RESULTS_WORKSHEET = "Individual Results"
 
 PRINT_LOCK = threading.Lock()
 
@@ -277,6 +281,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Don't mirror IDs/formulas into the Matches tab after syncing MatchData",
     )
+    parser.add_argument(
+        "--individual-results-spreadsheet-id",
+        default=INDIVIDUAL_RESULTS_SPREADSHEET_ID,
+        help="Spreadsheet ID to receive finished matches for the Individual Results tab",
+    )
+    parser.add_argument(
+        "--individual-results-worksheet",
+        default=INDIVIDUAL_RESULTS_WORKSHEET,
+        help='Destination tab for finished matches (default: "Individual Results")',
+    )
+    parser.add_argument(
+        "--skip-individual-results",
+        action="store_true",
+        help="Don't copy finished matches into the Individual Results spreadsheet",
+    )
+    parser.add_argument(
+        "--only-individual-results",
+        action="store_true",
+        help="Only copy finished matches into Individual Results, using current sheet values",
+    )
     parser.add_argument("--club-worksheet", default="ClubData")
     parser.add_argument(
         "--club-csv-output",
@@ -396,14 +420,25 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
             "JSON key to that path (or pass --credentials), and share the "
             "target sheet with the service account's email as an Editor."
         )
+    service_account_email = "the service account email"
+    try:
+        with credentials_path.open(encoding="utf-8") as handle:
+            service_account_email = json.load(handle).get("client_email") or service_account_email
+    except (OSError, json.JSONDecodeError):
+        pass
+
     gc = gspread.service_account(filename=str(credentials_path))
     try:
         return gc.open_by_key(spreadsheet_id)
+    except PermissionError as exc:
+        raise SystemExit(
+            f"Permission denied opening spreadsheet {spreadsheet_id}. Share it with "
+            f"{service_account_email} as an Editor and try again."
+        ) from exc
     except gspread.exceptions.APIError as exc:
         if "PERMISSION_DENIED" in str(exc):
-            service_account_email = gc.auth.service_account_email
             raise SystemExit(
-                f"Permission denied opening the sheet. Share it with "
+                f"Permission denied opening spreadsheet {spreadsheet_id}. Share it with "
                 f"{service_account_email} as an Editor and try again."
             ) from exc
         raise
@@ -552,6 +587,281 @@ def sync_matches_tab(spreadsheet, matchdata_ids: list[str]) -> None:
         matchdata_ids,
         data_start_row=MATCHES_DATA_START_ROW,
         last_formula_column=MATCHES_LAST_FORMULA_COLUMN,
+    )
+
+
+def value_at(row: list[Any], index: int) -> Any:
+    return row[index] if len(row) > index else ""
+
+
+def parse_sheet_date(value: Any) -> date | None:
+    if value in ("", None):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)):
+        # Google Sheets stores dates as days since 1899-12-30.
+        return date(1899, 12, 30) + timedelta(days=int(value))
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    elif " " in text and text[:10].count("-") == 2:
+        text = text.split(" ", 1)[0]
+
+    for date_format in (
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+        "%d %b %Y",
+        "%d %B %Y",
+    ):
+        try:
+            return datetime.strptime(text, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
+def normalize_sheet_value(value: Any) -> str:
+    text = str(value).strip() if value not in (None, "") else ""
+    try:
+        number = float(text)
+    except ValueError:
+        return " ".join(text.split()).casefold()
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
+
+
+def individual_result_key(values: tuple[Any, Any, Any, Any, Any]) -> tuple[str, str, str, str, str] | None:
+    match_date = parse_sheet_date(values[0])
+    if not match_date:
+        return None
+    return (
+        match_date.isoformat(),
+        normalize_sheet_value(values[1]),
+        normalize_sheet_value(values[2]),
+        normalize_sheet_value(values[3]),
+        normalize_sheet_value(values[4]),
+    )
+
+
+def row_has_formula(row: list[Any]) -> bool:
+    return any(str(value).startswith("=") for value in row)
+
+
+def ensure_individual_result_formula_rows(
+    destination_spreadsheet,
+    destination,
+    start_row: int,
+    end_row: int,
+) -> int:
+    if end_row > destination.row_count:
+        sheet_call(
+            lambda: destination.add_rows(end_row - destination.row_count),
+            description="Grow Individual Results tab",
+        )
+
+    last_col = column_letters(destination.col_count)
+    formula_values = sheet_call(
+        lambda: destination.get(
+            f"A1:{last_col}{destination.row_count}",
+            value_render_option="FORMULA",
+        ),
+        description="Read Individual Results formulas",
+    )
+
+    formula_last_row = start_row - 1
+    for offset in range(start_row, min(end_row, len(formula_values)) + 1):
+        if row_has_formula(formula_values[offset - 1]):
+            formula_last_row = offset
+        else:
+            break
+
+    if formula_last_row >= end_row:
+        return 0
+
+    source_row = formula_last_row
+    if source_row < 1:
+        return 0
+
+    copy_start_row = max(formula_last_row + 1, start_row)
+    if copy_start_row > end_row:
+        return 0
+
+    copy_request = {
+        "requests": [
+            {
+                "copyPaste": {
+                    "source": {
+                        "sheetId": destination.id,
+                        "startRowIndex": source_row - 1,
+                        "endRowIndex": source_row,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": destination.col_count,
+                    },
+                    "destination": {
+                        "sheetId": destination.id,
+                        "startRowIndex": copy_start_row - 1,
+                        "endRowIndex": end_row,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": destination.col_count,
+                    },
+                    "pasteType": "PASTE_NORMAL",
+                }
+            }
+        ]
+    }
+    sheet_call(
+        lambda: destination_spreadsheet.batch_update(copy_request),
+        description="Copy Individual Results formulas down",
+    )
+    return end_row - copy_start_row + 1
+
+
+def sync_individual_results(source_spreadsheet, args: argparse.Namespace) -> None:
+    source_matches = source_spreadsheet.worksheet(MATCHES_WORKSHEET)
+    source_matchdata = source_spreadsheet.worksheet(args.match_worksheet)
+
+    matches_values = sheet_call(
+        lambda: source_matches.get("A:Q", value_render_option="FORMATTED_VALUE"),
+        description="Read Matches tab for Individual Results",
+    )
+    matchdata_values = read_existing_values(
+        source_matchdata, "Read MatchData for Individual Results finished statuses"
+    )
+    if not matches_values or not matchdata_values:
+        safe_print("Individual Results: source Matches/MatchData is empty; nothing to copy.")
+        return
+
+    matchdata_header = matchdata_values[0]
+    match_id_col = matchdata_header.index("Match ID")
+    finished_col = matchdata_header.index("Finished")
+    finished_ids: set[str] = set()
+    for row in matchdata_values[1:]:
+        match_id = normalize_sheet_value(value_at(row, match_id_col))
+        finished = normalize_sheet_value(value_at(row, finished_col))
+        if match_id and finished in {"1", "true", "yes", "finished"}:
+            finished_ids.add(match_id)
+
+    destination_spreadsheet = open_spreadsheet(
+        args.individual_results_spreadsheet_id, args.credentials
+    )
+    destination = get_or_create_worksheet(
+        destination_spreadsheet, args.individual_results_worksheet, 10
+    )
+    destination_values = sheet_call(
+        lambda: destination.get_all_values(value_render_option="FORMATTED_VALUE"),
+        description="Read Individual Results tab",
+    )
+
+    dated_destination_rows: list[tuple[date, int, list[Any]]] = []
+    for offset, row in enumerate(destination_values[1:], start=2):
+        row_date = parse_sheet_date(value_at(row, 1))
+        if row_date:
+            dated_destination_rows.append((row_date, offset, row))
+    max_date = max((row_date for row_date, _, _ in dated_destination_rows), default=None)
+
+    existing_on_max_date: set[tuple[str, str, str, str, str]] = set()
+    max_date_last_row = len(destination_values)
+    if max_date:
+        max_date_last_row = max(
+            row_number for row_date, row_number, _ in dated_destination_rows if row_date == max_date
+        )
+        for row_date, _, row in dated_destination_rows:
+            if row_date != max_date:
+                continue
+            key = individual_result_key(
+                (
+                    value_at(row, 1),  # B: Date
+                    value_at(row, 2),  # C: Home
+                    value_at(row, 5),  # F: Away
+                    value_at(row, 8),  # I: Home score
+                    value_at(row, 9),  # J: Away score
+                )
+            )
+            if key:
+                existing_on_max_date.add(key)
+
+    today = datetime.now().date()
+    skipped_future = 0
+    rows_to_add: list[tuple[date, tuple[Any, Any, Any, Any, Any]]] = []
+    for row in matches_values[MATCHES_DATA_START_ROW - 1 :]:
+        match_id = normalize_sheet_value(value_at(row, 0))
+        if match_id not in finished_ids:
+            continue
+
+        result_values = (
+            value_at(row, 1),   # B: Date
+            value_at(row, 11),  # L: HomeAlt
+            value_at(row, 14),  # O: AwayAlt
+            value_at(row, 15),  # P: HomeS
+            value_at(row, 16),  # Q: AwayS
+        )
+        key = individual_result_key(result_values)
+        if not key:
+            continue
+
+        match_date = parse_sheet_date(result_values[0])
+        if match_date > today:
+            skipped_future += 1
+            continue
+        if max_date is None or match_date > max_date:
+            rows_to_add.append((match_date, result_values))
+        elif match_date == max_date and key not in existing_on_max_date:
+            rows_to_add.append((match_date, result_values))
+
+    if not rows_to_add:
+        max_date_text = max_date.isoformat() if max_date else "no existing date"
+        future_text = (
+            f" Skipped {skipped_future:,} future-dated finished match(es)."
+            if skipped_future
+            else ""
+        )
+        safe_print(f"Individual Results: no new finished matches after {max_date_text}.{future_text}")
+        return
+
+    rows_to_add.sort(key=lambda item: item[0])
+    start_row = max(1, max_date_last_row + 1)
+    end_row = start_row + len(rows_to_add) - 1
+    copied_formula_rows = ensure_individual_result_formula_rows(
+        destination_spreadsheet, destination, start_row, end_row
+    )
+
+    updates = []
+    for offset, (match_date, values) in enumerate(rows_to_add):
+        row_number = start_row + offset
+        updates.extend(
+            [
+                {"range": f"B{row_number}", "values": [[match_date.strftime("%d/%m/%Y")]]},
+                {"range": f"C{row_number}", "values": [[values[1]]]},
+                {"range": f"F{row_number}", "values": [[values[2]]]},
+                {"range": f"I{row_number}", "values": [[values[3]]]},
+                {"range": f"J{row_number}", "values": [[values[4]]]},
+            ]
+        )
+
+    for start in range(0, len(updates), args.sheet_batch_size * 5):
+        chunk = updates[start : start + args.sheet_batch_size * 5]
+        sheet_call(
+            lambda chunk=chunk: destination.batch_update(
+                [dict(item) for item in chunk], value_input_option="USER_ENTERED"
+            ),
+            description="Write Individual Results rows",
+        )
+
+    max_date_text = max_date.isoformat() if max_date else "no existing date"
+    safe_print(
+        f"Individual Results: wrote {len(rows_to_add):,} finished match(es) "
+        f"starting under {max_date_text}; copied formulas into "
+        f"{copied_formula_rows:,} row(s); skipped {skipped_future:,} future-dated "
+        "finished match(es)."
     )
 
 
@@ -1066,6 +1376,11 @@ def main() -> int:
     args.club_csv_output = args.club_csv_output.resolve()
     args.club_errors = args.club_errors.resolve()
 
+    if args.only_individual_results:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        sync_individual_results(spreadsheet, args)
+        return 0
+
     player_ids = gp.load_player_ids(args.input)
     safe_print(f"Loaded {len(player_ids):,} player IDs from {args.input}")
 
@@ -1209,6 +1524,17 @@ def main() -> int:
             match_worksheet = spreadsheet.worksheet(args.match_worksheet)
             matchdata_ids = id_column_values(match_worksheet, "Read final MatchData IDs")[1:]
             sync_matches_tab(spreadsheet, matchdata_ids)
+
+    if not args.skip_individual_results:
+        if args.skip_matches:
+            safe_print(
+                "Individual Results: MatchData sync was skipped; copying from current sheet values."
+            )
+        elif args.skip_matches_tab:
+            safe_print(
+                "Individual Results: Matches tab sync was skipped; copying from current Matches tab values."
+            )
+        sync_individual_results(spreadsheet, args)
 
     club_errors: list[tuple[str, str]] = []
     if not args.skip_clubs:
