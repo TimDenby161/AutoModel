@@ -1,0 +1,74 @@
+name: Sync FotMob Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      sync_players:
+        description: "Players"
+        type: boolean
+        default: true
+      sync_managers:
+        description: "Managers"
+        type: boolean
+        default: true
+      sync_competitions:
+        description: "Competitions / Leagues"
+        type: boolean
+        default: true
+      sync_matches:
+        description: "Matches"
+        type: boolean
+        default: true
+      sync_clubs:
+        description: "Clubs"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install gspread
+
+      - name: Write service account credentials
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Build sync flags
+        id: flags
+        run: |
+          FLAGS=""
+          [ "${{ inputs.sync_players }}" != "true" ] && FLAGS="$FLAGS --skip-players"
+          [ "${{ inputs.sync_managers }}" != "true" ] && FLAGS="$FLAGS --skip-managers"
+          [ "${{ inputs.sync_competitions }}" != "true" ] && FLAGS="$FLAGS --skip-competitions"
+          [ "${{ inputs.sync_matches }}" != "true" ] && FLAGS="$FLAGS --skip-matches"
+          [ "${{ inputs.sync_clubs }}" != "true" ] && FLAGS="$FLAGS --skip-clubs"
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Run sync
+        run: python syncPlayersToSheet.py ${{ steps.flags.outputs.flags }}
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f service_account.json
+
+      - name: Commit updated data
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -- '*.csv'
+          git diff --cached --quiet || git commit -m "Automated data sync $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push

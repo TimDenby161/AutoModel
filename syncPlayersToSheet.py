@@ -161,6 +161,11 @@ def parse_args() -> argparse.Namespace:
         help="Error CSV, rewritten each run",
     )
     parser.add_argument(
+        "--skip-players",
+        action="store_true",
+        help="Don't sync the PlayerData sheet in this run",
+    )
+    parser.add_argument(
         "--skip-players-tab",
         action="store_true",
         help="Don't mirror IDs/formulas into the Players tab after syncing PlayerData",
@@ -1358,33 +1363,10 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
     return errors
 
 
-def main() -> int:
-    args = parse_args()
-    args.input = args.input.resolve()
-    args.csv_output = args.csv_output.resolve()
-    args.errors = args.errors.resolve()
-    args.credentials = args.credentials.resolve()
-    args.manager_input = args.manager_input.resolve()
-    args.manager_csv_output = args.manager_csv_output.resolve()
-    args.manager_errors = args.manager_errors.resolve()
-    args.competition_input = args.competition_input.resolve()
-    args.competition_csv_output = args.competition_csv_output.resolve()
-    args.competition_errors = args.competition_errors.resolve()
-    args.club_input = args.club_input.resolve()
-    args.match_csv_output = args.match_csv_output.resolve()
-    args.match_errors = args.match_errors.resolve()
-    args.club_csv_output = args.club_csv_output.resolve()
-    args.club_errors = args.club_errors.resolve()
-
-    if args.only_individual_results:
-        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
-        sync_individual_results(spreadsheet, args)
-        return 0
-
+def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
     player_ids = gp.load_player_ids(args.input)
     safe_print(f"Loaded {len(player_ids):,} player IDs from {args.input}")
 
-    spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
     worksheet = get_or_create_worksheet(spreadsheet, args.worksheet, len(gp.HEADERS))
     existing_values = read_existing_values(worksheet, "Read sheet")
 
@@ -1490,16 +1472,49 @@ def main() -> int:
     if errors:
         write_errors(args.errors, errors)
 
-    if not args.skip_players_tab:
-        playerdata_ids = id_column_values(worksheet, "Read final PlayerData IDs")[1:]
-        sync_players_tab(spreadsheet, playerdata_ids)
-
     safe_print(
         f"Done. {len(appended_rows):,} new players added, "
         f"{len(updates):,} existing players refreshed, {len(errors):,} failed."
     )
     safe_print(f"Sheet: https://docs.google.com/spreadsheets/d/{args.spreadsheet_id}")
     safe_print(f"CSV: {args.csv_output}")
+    return errors
+
+
+def main() -> int:
+    args = parse_args()
+    args.input = args.input.resolve()
+    args.csv_output = args.csv_output.resolve()
+    args.errors = args.errors.resolve()
+    args.credentials = args.credentials.resolve()
+    args.manager_input = args.manager_input.resolve()
+    args.manager_csv_output = args.manager_csv_output.resolve()
+    args.manager_errors = args.manager_errors.resolve()
+    args.competition_input = args.competition_input.resolve()
+    args.competition_csv_output = args.competition_csv_output.resolve()
+    args.competition_errors = args.competition_errors.resolve()
+    args.club_input = args.club_input.resolve()
+    args.match_csv_output = args.match_csv_output.resolve()
+    args.match_errors = args.match_errors.resolve()
+    args.club_csv_output = args.club_csv_output.resolve()
+    args.club_errors = args.club_errors.resolve()
+
+    if args.only_individual_results:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        sync_individual_results(spreadsheet, args)
+        return 0
+
+    spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+    errors: list[tuple[str, str]] = []
+
+    if args.skip_players:
+        safe_print("Skipping PlayerData sync.")
+    else:
+        errors = sync_player_data(spreadsheet, args)
+        if not args.skip_players_tab:
+            player_worksheet = spreadsheet.worksheet(args.worksheet)
+            playerdata_ids = id_column_values(player_worksheet, "Read final PlayerData IDs")[1:]
+            sync_players_tab(spreadsheet, playerdata_ids)
     if errors:
         safe_print(f"Errors: {args.errors}")
 

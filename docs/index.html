@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FotMob Data</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2a78d6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FotMob">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:      #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --series-blue:    #2a78d6;
+    --series-orange:  #eb6834;
+    --series-aqua:    #1baf7a;
+    --status-good:    #0ca30c;
+    --status-critical:#d03b3b;
+    --chip-bg:        #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page-plane:      #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --series-blue:    #3987e5;
+      --series-orange:  #d95926;
+      --series-aqua:    #199e70;
+      --status-good:    #0ca30c;
+      --status-critical:#e66767;
+      --chip-bg:        #26261f;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page-plane:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-blue:    #3987e5;
+    --series-orange:  #d95926;
+    --series-aqua:    #199e70;
+    --status-good:    #0ca30c;
+    --status-critical:#e66767;
+    --chip-bg:        #26261f;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: contain;
+  }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+  }
+  header h1 {
+    margin: 0 0 2px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .meta-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+  }
+  #status-line {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  #refresh-btn {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-primary); border-radius: 8px; padding: 6px 12px;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+  }
+  #refresh-btn:active { opacity: 0.7; }
+  #refresh-btn[data-loading="true"] { opacity: 0.5; pointer-events: none; }
+
+  nav.tabs {
+    display: flex; gap: 4px;
+    background: var(--chip-bg);
+    border-radius: 10px;
+    padding: 3px;
+    margin-top: 12px;
+  }
+  nav.tabs button {
+    flex: 1; appearance: none; border: none; background: transparent;
+    color: var(--text-secondary); font-family: inherit; font-size: 13px; font-weight: 600;
+    padding: 8px 4px; border-radius: 8px;
+  }
+  nav.tabs button[aria-selected="true"] {
+    background: var(--surface-1); color: var(--text-primary);
+    box-shadow: 0 1px 2px var(--border);
+  }
+
+  main { padding: 12px 16px 40px; max-width: 720px; margin: 0 auto; }
+  .panel { display: none; }
+  .panel[data-active="true"] { display: block; }
+
+  .empty-state {
+    text-align: center; color: var(--text-muted); font-size: 14px;
+    padding: 40px 16px;
+  }
+
+  .card-list { display: flex; flex-direction: column; gap: 8px; }
+  .match-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .match-comp {
+    font-size: 11px; color: var(--text-muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.02em;
+    display: flex; justify-content: space-between;
+  }
+  .match-teams {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 6px; gap: 8px;
+  }
+  .match-team { flex: 1; font-size: 14px; font-weight: 600; }
+  .match-team.away { text-align: right; }
+  .match-score {
+    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+    padding: 2px 10px; border-radius: 6px; background: var(--chip-bg);
+    white-space: nowrap;
+  }
+  .result-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
+    margin-top: 6px;
+  }
+  .result-pill.win { color: var(--status-good); }
+  .result-pill.loss { color: var(--status-critical); }
+  .result-pill.draw { color: var(--text-muted); }
+  .result-pill .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block;
+  }
+
+  .search-row { margin-bottom: 10px; }
+  #player-search {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); font-size: 14px; font-family: inherit;
+  }
+
+  table.leaderboard { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.leaderboard th, table.leaderboard td {
+    padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--gridline);
+  }
+  table.leaderboard th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em;
+    color: var(--text-muted); font-weight: 600; position: sticky; top: 0;
+    background: var(--page-plane);
+  }
+  table.leaderboard td.num, table.leaderboard th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.leaderboard tbody tr:active { background: var(--chip-bg); }
+  .player-name { font-weight: 600; }
+  .player-sub { color: var(--text-muted); font-size: 11px; }
+  th.sortable { cursor: pointer; }
+  th.sortable.active { color: var(--series-blue); }
+
+  .config-warning {
+    background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+  }
+  .config-warning code {
+    background: var(--surface-1); padding: 1px 5px; border-radius: 4px; font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FotMob Data</h1>
+  <div class="meta-row">
+    <span id="status-line">Loading&hellip;</span>
+    <button id="refresh-btn" type="button">Refresh</button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
+    <button role="tab" data-tab="results" aria-selected="false">Results</button>
+    <button role="tab" data-tab="leaderboard" aria-selected="false">Leaders</button>
+  </nav>
+</header>
+
+<main>
+  <section class="panel" data-tab="fixtures" data-active="true">
+    <div id="fixtures-list" class="card-list"></div>
+  </section>
+
+  <section class="panel" data-tab="results">
+    <div id="results-list" class="card-list"></div>
+  </section>
+
+  <section class="panel" data-tab="leaderboard">
+    <div class="search-row">
+      <input id="player-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="leaderboard">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th class="num sortable" data-key="rating">Rtg</th>
+            <th class="num sortable" data-key="goals">G</th>
+            <th class="num sortable" data-key="assists">A</th>
+            <th class="num sortable" data-key="apps">Apps</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-9S4pUCLNfcHOxvxU/1Z6+cyf7RuHUlIfl6aRvvfnFOCzQ5nQFcE1lLKUpXqQxgTS5c5m9EE0Ijp7BQxvj0Y6/A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+// ---- Configuration ----------------------------------------------------
+// Fill these in after using Google Sheets' File > Share > Publish to web
+// on the MatchData and PlayerData tabs (CSV format, specific sheet, not
+// "Entire Document"). Each looks like:
+//   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
+const CONFIG = {
+  matchDataCsvUrl: "",
+  playerDataCsvUrl: "",
+  currentSeason: 2027,
+  upcomingCount: 15,
+  resultsCount: 15,
+};
+// -------------------------------------------------------------------
+
+const state = { matches: [], players: [], sortKey: "rating", sortDir: -1 };
+
+function setStatus(text) {
+  document.getElementById("status-line").textContent = text;
+}
+
+function showConfigWarning(container) {
+  container.innerHTML = `<div class="config-warning">
+    This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
+    in the repo, fill in <code>CONFIG.matchDataCsvUrl</code> and
+    <code>CONFIG.playerDataCsvUrl</code> with the links from Google Sheets'
+    <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
+    at a time), then commit.
+  </div>`;
+}
+
+function parseCsv(url) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => resolve(results.data),
+      error: reject,
+    });
+  });
+}
+
+function toNum(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function formatKickoff(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+function renderFixtures() {
+  const container = document.getElementById("fixtures-list");
+  const now = Date.now();
+  const upcoming = state.matches
+    .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m["Match UTC"])
+    .filter((m) => new Date(m["Match UTC"]).getTime() >= now - 1000 * 60 * 60 * 2)
+    .sort((a, b) => new Date(a["Match UTC"]) - new Date(b["Match UTC"]))
+    .slice(0, CONFIG.upcomingCount);
+
+  if (!upcoming.length) {
+    container.innerHTML = `<div class="empty-state">No upcoming fixtures found.</div>`;
+    return;
+  }
+  container.innerHTML = upcoming.map((m) => `
+    <div class="match-card">
+      <div class="match-comp">
+        <span>${escapeHtml(m.Competition || "")}</span>
+        <span>${escapeHtml(formatKickoff(m["Match UTC"]))}</span>
+      </div>
+      <div class="match-teams">
+        <div class="match-team">${escapeHtml(m["Home Club"])}</div>
+        <div class="match-score">vs</div>
+        <div class="match-team away">${escapeHtml(m["Away Club"])}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function resultPill(m) {
+  const home = toNum(m["Home Score"]);
+  const away = toNum(m["Away Score"]);
+  const result = m.Result || "";
+  let cls = "draw", label = "Draw", glyph = "&#9679;";
+  if (result === "Home Win") { cls = "win"; label = `${escapeHtml(m["Home Club"])} won`; }
+  else if (result === "Away Win") { cls = "win"; label = `${escapeHtml(m["Away Club"])} won`; }
+  return `<span class="result-pill ${cls}"><span class="dot"></span>${label}</span>`;
+}
+
+function renderResults() {
+  const container = document.getElementById("results-list");
+  const recent = state.matches
+    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m["Match UTC"])
+    .sort((a, b) => new Date(b["Match UTC"]) - new Date(a["Match UTC"]))
+    .slice(0, CONFIG.resultsCount);
+
+  if (!recent.length) {
+    container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
+    return;
+  }
+  container.innerHTML = recent.map((m) => `
+    <div class="match-card">
+      <div class="match-comp">
+        <span>${escapeHtml(m.Competition || "")}</span>
+        <span>${escapeHtml(formatKickoff(m["Match UTC"]))}</span>
+      </div>
+      <div class="match-teams">
+        <div class="match-team">${escapeHtml(m["Home Club"])}</div>
+        <div class="match-score">${escapeHtml(m["Home Score"])}&ndash;${escapeHtml(m["Away Score"])}</div>
+        <div class="match-team away">${escapeHtml(m["Away Club"])}</div>
+      </div>
+      ${resultPill(m)}
+    </div>
+  `).join("");
+}
+
+function playerRow(p) {
+  const season = CONFIG.currentSeason;
+  return {
+    name: p.Name || "",
+    club: p["Current Club"] || "",
+    position: p["Primary Position"] || "",
+    rating: toNum(p[`${season} Rating`]),
+    goals: toNum(p[`${season} Goals`]),
+    assists: toNum(p[`${season} Assists`]),
+    apps: toNum(p[`${season} Appearances`]),
+  };
+}
+
+function renderLeaderboard() {
+  const body = document.getElementById("leaderboard-body");
+  const query = document.getElementById("player-search").value.trim().toLowerCase();
+
+  let rows = state.players.map(playerRow).filter((r) => r.apps > 0 || r.rating > 0);
+  if (query) {
+    rows = rows.filter((r) =>
+      r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
+    );
+  }
+  rows.sort((a, b) => (a[state.sortKey] - b[state.sortKey]) * state.sortDir);
+  rows = rows.slice(0, 100);
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">No matching players.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((r) => `
+    <tr>
+      <td>
+        <div class="player-name">${escapeHtml(r.name)}</div>
+        <div class="player-sub">${escapeHtml(r.club)}${r.position ? " &middot; " + escapeHtml(r.position) : ""}</div>
+      </td>
+      <td class="num">${r.rating ? r.rating.toFixed(2) : "&ndash;"}</td>
+      <td class="num">${r.goals}</td>
+      <td class="num">${r.assists}</td>
+      <td class="num">${r.apps}</td>
+    </tr>
+  `).join("");
+}
+
+function renderAll() {
+  renderFixtures();
+  renderResults();
+  renderLeaderboard();
+}
+
+async function loadData() {
+  if (!CONFIG.matchDataCsvUrl || !CONFIG.playerDataCsvUrl) {
+    showConfigWarning(document.getElementById("fixtures-list"));
+    showConfigWarning(document.getElementById("results-list"));
+    document.getElementById("leaderboard-body").innerHTML = "";
+    setStatus("Not configured");
+    return;
+  }
+  const btn = document.getElementById("refresh-btn");
+  btn.dataset.loading = "true";
+  setStatus("Loading&hellip;");
+  try {
+    const [matches, players] = await Promise.all([
+      parseCsv(CONFIG.matchDataCsvUrl),
+      parseCsv(CONFIG.playerDataCsvUrl),
+    ]);
+    state.matches = matches;
+    state.players = players;
+    renderAll();
+    setStatus("Updated " + new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
+  } catch (err) {
+    setStatus("Failed to load data");
+    console.error(err);
+  } finally {
+    btn.dataset.loading = "false";
+  }
+}
+
+document.querySelectorAll("nav.tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", "false"));
+    btn.setAttribute("aria-selected", "true");
+    const tab = btn.dataset.tab;
+    document.querySelectorAll(".panel").forEach((p) => p.dataset.active = String(p.dataset.tab === tab));
+  });
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadData);
+document.getElementById("player-search").addEventListener("input", renderLeaderboard);
+document.querySelectorAll("th.sortable").forEach((th) => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.key;
+    if (state.sortKey === key) {
+      state.sortDir *= -1;
+    } else {
+      state.sortKey = key;
+      state.sortDir = -1;
+    }
+    document.querySelectorAll("th.sortable").forEach((t) => t.classList.remove("active"));
+    th.classList.add("active");
+    renderLeaderboard();
+  });
+});
+
+loadData();
+</script>
+</body>
+</html>
