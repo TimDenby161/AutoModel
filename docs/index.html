@@ -794,6 +794,24 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
+// Google's export stalls are usually transient - a couple of retries
+// clears most of them up without the user ever seeing an error.
+async function fetchWithRetry(taskFn, label, retries = 2, retryDelayMs = 1500) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await withTimeout(taskFn(), FETCH_TIMEOUT_MS, label);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        console.warn(`${label} failed (attempt ${attempt + 1}/${retries + 1}), retrying...`, err);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 function showLoadErrorCard(container, label) {
   container.innerHTML = `<div class="empty-state">Failed to load ${label}. Try Refresh.</div>`;
 }
@@ -816,7 +834,7 @@ async function loadData() {
   setStatus("Loading…");
 
   const tasks = [
-    withTimeout(parseCsv(CONFIG.matchesTabCsvUrl), FETCH_TIMEOUT_MS, "Matches")
+    fetchWithRetry(() => parseCsv(CONFIG.matchesTabCsvUrl), "Matches")
       .then((fixtures) => {
         state.fixtures = fixtures;
         renderFixtures();
@@ -828,7 +846,7 @@ async function loadData() {
         showLoadErrorCard(document.getElementById("results-list"), "results");
         throw err;
       }),
-    withTimeout(parseCsv(CONFIG.leaderboardCsvUrl), FETCH_TIMEOUT_MS, "Leaderboard")
+    fetchWithRetry(() => parseCsv(CONFIG.leaderboardCsvUrl), "Leaderboard")
       .then((players) => {
         state.players = players;
         renderLeaderboard();
@@ -838,7 +856,7 @@ async function loadData() {
         showLoadErrorRow(document.getElementById("leaderboard-body"), 8, "the leaderboard");
         throw err;
       }),
-    withTimeout(parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1), FETCH_TIMEOUT_MS, "FPL")
+    fetchWithRetry(() => parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1), "FPL")
       .then((fpl) => {
         state.fpl = fpl;
         renderFpl();
