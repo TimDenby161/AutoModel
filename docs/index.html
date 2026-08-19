@@ -474,18 +474,21 @@ function matchProbsRow(m) {
   `;
 }
 
-// Round-ahead fallback: leagues go quiet between rounds (or a whole
-// season hasn't kicked off yet), so "today" is often empty even though
-// the filter is otherwise valid. Rather than a bare empty state, fall
-// back to the next couple of rounds - grouped by League ID + Round so
-// mixed-league filters (e.g. English Teams) don't conflate one league's
-// "Round 1" with another's.
+// Round-ahead: a single-league filter's "today" is often just one or two
+// fixtures out of a full round spread across several days (LaLiga's round
+// 1, say), so single-league filters always extend to the next couple of
+// rounds rather than stopping at today. Multi-league filters (All, English
+// Teams) only extend when today is completely empty - "round" isn't one
+// shared sequence across different competitions, so grouping by League
+// ID + Round and always extending would just chop most of a busy day down
+// to whichever competition's round happened to sort first.
 const FIXTURES_LOOKAHEAD_ROUNDS = 2;
 
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
   const leagueIds = LEAGUE_FILTERS[state.fixtureFilter];
+  const isSingleLeague = Array.isArray(leagueIds) && leagueIds.length === 1;
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const allUpcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
@@ -493,10 +496,15 @@ function renderFixtures() {
     .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
     .sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
-  let upcoming = allUpcoming.filter((m) => isSameLocalDay(m.Date, today));
-  let note = "";
+  if (!allUpcoming.length) {
+    container.innerHTML = `<div class="empty-state">No fixtures found.</div>`;
+    return;
+  }
 
-  if (!upcoming.length && allUpcoming.length) {
+  const hasToday = allUpcoming.some((m) => isSameLocalDay(m.Date, today));
+  let upcoming = allUpcoming.filter((m) => isSameLocalDay(m.Date, today));
+
+  if (isSingleLeague || !hasToday) {
     const roundKeys = [];
     for (const m of allUpcoming) {
       const key = `${m.ID}|${m.Round}`;
@@ -504,13 +512,11 @@ function renderFixtures() {
       if (roundKeys.length >= FIXTURES_LOOKAHEAD_ROUNDS) break;
     }
     upcoming = allUpcoming.filter((m) => roundKeys.includes(`${m.ID}|${m.Round}`));
-    note = `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing the next rounds.</div>`;
   }
 
-  if (!upcoming.length) {
-    container.innerHTML = `<div class="empty-state">No fixtures found.</div>`;
-    return;
-  }
+  const note = hasToday
+    ? ""
+    : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing the next rounds.</div>`;
   container.innerHTML = note + upcoming.map((m) => `
     <div class="match-card">
       <div class="match-comp">
