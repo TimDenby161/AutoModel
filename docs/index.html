@@ -141,6 +141,10 @@
   }
   .match-team { flex: 1; font-size: 14px; font-weight: 600; }
   .match-team.away { text-align: right; }
+  .club-score {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    margin-top: 2px; font-variant-numeric: tabular-nums;
+  }
   .match-score {
     display: flex; align-items: center; gap: 6px;
     font-size: 13px; font-weight: 700;
@@ -341,6 +345,16 @@ function isSameLocalDay(dateStr, reference) {
   );
 }
 
+// HomeScr/AwayScr (columns V/Y on the Matches tab) are per-club rating
+// values, not the match result - published as formatted numbers (e.g.
+// "1,007") so commas need stripping before parsing.
+function clubScoreLabel(raw) {
+  if (raw == null || String(raw).trim() === "") return "";
+  const n = parseFloat(String(raw).replace(/,/g, ""));
+  if (!Number.isFinite(n)) return "";
+  return `<div class="club-score">${n.toLocaleString()}</div>`;
+}
+
 function matchScoreCenter(m) {
   const projH = parseFloat(m.ProjH);
   const projA = parseFloat(m.ProjA);
@@ -409,9 +423,15 @@ function renderFixtures() {
         <span>${escapeHtml(formatKickoff(m.Date))}</span>
       </div>
       <div class="match-teams">
-        <div class="match-team">${escapeHtml(m.Home)}</div>
+        <div class="match-team">
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.HomeScr)}
+        </div>
         ${matchScoreCenter(m)}
-        <div class="match-team away">${escapeHtml(m.Away)}</div>
+        <div class="match-team away">
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.AwayScr)}
+        </div>
       </div>
       ${matchProbsRow(m)}
     </div>
