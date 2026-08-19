@@ -323,7 +323,7 @@
             <th class="num sortable" data-key="rating">Rtg</th>
             <th class="num sortable" data-key="goals">G</th>
             <th class="num sortable" data-key="assists">A</th>
-            <th class="num sortable" data-key="apps">Apps</th>
+            <th class="num sortable" data-key="ability">AB</th>
           </tr>
         </thead>
         <tbody id="leaderboard-body"></tbody>
@@ -336,16 +336,19 @@
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
-// on the PlayerData and Matches tabs (CSV format, specific sheet, not
+// on the Data and Matches tabs (CSV format, specific sheet, not
 // "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
-  playerDataCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1325393950&single=true&output=csv",
+  // "Data" tab: a QUERY(Players!...) formula pulling just the columns the
+  // leaderboard needs (Position/Name/Age/Club/Ability/Goals/Assists/Rating/
+  // Minutes/xG/NPxG/xA) - a few hundred KB instead of PlayerData's full
+  // 700+ column, ~10MB export.
+  leaderboardCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=209002649&single=true&output=csv",
   // Fixtures and Results are both driven from this one "Matches" tab -
   // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
   // and the club-score rating (HomeScr/AwayScr) all in one place.
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
-  currentSeason: 2027,
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
@@ -381,7 +384,7 @@ function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
     This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
     in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code> and
-    <code>CONFIG.playerDataCsvUrl</code> with the links from Google Sheets'
+    <code>CONFIG.leaderboardCsvUrl</code> with the links from Google Sheets'
     <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
     at a time), then commit.
   </div>`;
@@ -596,15 +599,16 @@ function renderResults() {
 }
 
 function playerRow(p) {
-  const season = CONFIG.currentSeason;
   return {
     name: p.Name || "",
-    club: p["Current Club"] || "",
-    position: p["Primary Position"] || "",
-    rating: toNum(p[`${season} Rating`]),
-    goals: toNum(p[`${season} Goals`]),
-    assists: toNum(p[`${season} Assists`]),
-    apps: toNum(p[`${season} Appearances`]),
+    club: p.Club || "",
+    position: p.Position || "",
+    age: toNum(p.Age),
+    rating: toNum(p.Rating),
+    goals: toNum(p.Goals),
+    assists: toNum(p.Assists),
+    ability: toNum(p.Ability),
+    minutes: toNum(p.Minutes),
   };
 }
 
@@ -612,7 +616,7 @@ function renderLeaderboard() {
   const body = document.getElementById("leaderboard-body");
   const query = document.getElementById("player-search").value.trim().toLowerCase();
 
-  let rows = state.players.map(playerRow).filter((r) => r.apps > 0 || r.rating > 0);
+  let rows = state.players.map(playerRow).filter((r) => r.minutes > 0 || r.rating > 0);
   if (query) {
     rows = rows.filter((r) =>
       r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
@@ -629,12 +633,12 @@ function renderLeaderboard() {
     <tr>
       <td>
         <div class="player-name">${escapeHtml(r.name)}</div>
-        <div class="player-sub">${escapeHtml(r.club)}${r.position ? " &middot; " + escapeHtml(r.position) : ""}</div>
+        <div class="player-sub">${escapeHtml(r.club)}${r.position ? " &middot; " + escapeHtml(r.position) : ""}${r.age ? " &middot; " + r.age : ""}</div>
       </td>
       <td class="num">${r.rating ? r.rating.toFixed(2) : "&ndash;"}</td>
       <td class="num">${r.goals}</td>
       <td class="num">${r.assists}</td>
-      <td class="num">${r.apps}</td>
+      <td class="num">${r.ability}</td>
     </tr>
   `).join("");
 }
@@ -646,7 +650,7 @@ function renderAll() {
 }
 
 async function loadData() {
-  if (!CONFIG.playerDataCsvUrl || !CONFIG.matchesTabCsvUrl) {
+  if (!CONFIG.leaderboardCsvUrl || !CONFIG.matchesTabCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("leaderboard-body").innerHTML = "";
@@ -658,7 +662,7 @@ async function loadData() {
   setStatus("Loading&hellip;");
   try {
     const [players, fixtures] = await Promise.all([
-      parseCsv(CONFIG.playerDataCsvUrl),
+      parseCsv(CONFIG.leaderboardCsvUrl),
       parseCsv(CONFIG.matchesTabCsvUrl),
     ]);
     state.players = players;
