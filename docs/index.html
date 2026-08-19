@@ -253,7 +253,6 @@ const CONFIG = {
   // projection columns the MatchData tab doesn't.
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
   currentSeason: 2027,
-  upcomingCount: 15,
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
@@ -314,17 +313,25 @@ function projectionLine(m) {
   return `<div class="projection-line">Projected ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
 }
 
+function isSameLocalDay(dateStr, reference) {
+  const d = new Date(dateStr);
+  return (
+    d.getFullYear() === reference.getFullYear() &&
+    d.getMonth() === reference.getMonth() &&
+    d.getDate() === reference.getDate()
+  );
+}
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
-  const now = Date.now();
+  const today = new Date();
   const upcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
-    .filter((m) => new Date(m.Date).getTime() >= now - 1000 * 60 * 60 * 2)
-    .sort((a, b) => new Date(a.Date) - new Date(b.Date))
-    .slice(0, CONFIG.upcomingCount);
+    .filter((m) => isSameLocalDay(m.Date, today))
+    .sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
   if (!upcoming.length) {
-    container.innerHTML = `<div class="empty-state">No upcoming fixtures found.</div>`;
+    container.innerHTML = `<div class="empty-state">No fixtures today.</div>`;
     return;
   }
   container.innerHTML = upcoming.map((m) => `
