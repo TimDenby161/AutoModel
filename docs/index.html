@@ -146,6 +146,10 @@
     padding: 2px 10px; border-radius: 6px; background: var(--chip-bg);
     white-space: nowrap;
   }
+  .projection-line {
+    margin-top: 6px; font-size: 12px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
   .result-pill {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
@@ -245,13 +249,16 @@
 const CONFIG = {
   matchDataCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1923587290&single=true&output=csv",
   playerDataCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1325393950&single=true&output=csv",
+  // "Matches" tab (not MatchData) - has the ProjH/ProjA expected-score
+  // projection columns the MatchData tab doesn't.
+  matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
   currentSeason: 2027,
   upcomingCount: 15,
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
-const state = { matches: [], players: [], sortKey: "rating", sortDir: -1 };
+const state = { matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1 };
 
 function setStatus(text) {
   document.getElementById("status-line").textContent = text;
@@ -300,13 +307,20 @@ function formatKickoff(iso) {
   });
 }
 
+function projectionLine(m) {
+  const projH = parseFloat(m.ProjH);
+  const projA = parseFloat(m.ProjA);
+  if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
+  return `<div class="projection-line">Projected ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
+}
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const now = Date.now();
-  const upcoming = state.matches
-    .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m["Match UTC"])
-    .filter((m) => new Date(m["Match UTC"]).getTime() >= now - 1000 * 60 * 60 * 2)
-    .sort((a, b) => new Date(a["Match UTC"]) - new Date(b["Match UTC"]))
+  const upcoming = state.fixtures
+    .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
+    .filter((m) => new Date(m.Date).getTime() >= now - 1000 * 60 * 60 * 2)
+    .sort((a, b) => new Date(a.Date) - new Date(b.Date))
     .slice(0, CONFIG.upcomingCount);
 
   if (!upcoming.length) {
@@ -316,14 +330,15 @@ function renderFixtures() {
   container.innerHTML = upcoming.map((m) => `
     <div class="match-card">
       <div class="match-comp">
-        <span>${escapeHtml(m.Competition || "")}</span>
-        <span>${escapeHtml(formatKickoff(m["Match UTC"]))}</span>
+        <span>${escapeHtml(m.League || "")}</span>
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
       </div>
       <div class="match-teams">
-        <div class="match-team">${escapeHtml(m["Home Club"])}</div>
+        <div class="match-team">${escapeHtml(m.Home)}</div>
         <div class="match-score">vs</div>
-        <div class="match-team away">${escapeHtml(m["Away Club"])}</div>
+        <div class="match-team away">${escapeHtml(m.Away)}</div>
       </div>
+      ${projectionLine(m)}
     </div>
   `).join("");
 }
@@ -416,7 +431,7 @@ function renderAll() {
 }
 
 async function loadData() {
-  if (!CONFIG.matchDataCsvUrl || !CONFIG.playerDataCsvUrl) {
+  if (!CONFIG.matchDataCsvUrl || !CONFIG.playerDataCsvUrl || !CONFIG.matchesTabCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("leaderboard-body").innerHTML = "";
@@ -427,12 +442,14 @@ async function loadData() {
   btn.dataset.loading = "true";
   setStatus("Loading&hellip;");
   try {
-    const [matches, players] = await Promise.all([
+    const [matches, players, fixtures] = await Promise.all([
       parseCsv(CONFIG.matchDataCsvUrl),
       parseCsv(CONFIG.playerDataCsvUrl),
+      parseCsv(CONFIG.matchesTabCsvUrl),
     ]);
     state.matches = matches;
     state.players = players;
+    state.fixtures = fixtures;
     renderAll();
     setStatus("Updated " + new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
   } catch (err) {
