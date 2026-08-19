@@ -202,6 +202,17 @@
     width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block;
   }
 
+  .filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .filter-chip {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 6px 10px; border-radius: 20px;
+  }
+  .filter-chip[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--series-blue) 16%, transparent);
+    color: var(--series-blue); border-color: transparent;
+  }
+
   .search-row { margin-bottom: 10px; }
   #player-search {
     width: 100%; padding: 10px 12px; border-radius: 8px;
@@ -251,6 +262,12 @@
 
 <main>
   <section class="panel" data-tab="fixtures" data-active="true">
+    <div class="filter-row" id="fixture-filters">
+      <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="filter-chip" data-filter="pl" aria-pressed="false">Premier League</button>
+      <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
+      <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
+    </div>
     <div id="fixtures-list" class="card-list"></div>
   </section>
 
@@ -297,7 +314,15 @@ const CONFIG = {
 };
 // -------------------------------------------------------------------
 
-const state = { matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1 };
+const state = { matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1, fixtureFilter: "all" };
+
+// League IDs (the Matches tab's "ID" column, immediately left of "League").
+const FIXTURE_LEAGUE_FILTERS = {
+  all: null,
+  pl: ["47"],
+  l2: ["109"],
+  eng: ["47", "48", "108", "109", "117", "8944"],
+};
 
 function setStatus(text) {
   document.getElementById("status-line").textContent = text;
@@ -419,9 +444,11 @@ function matchProbsRow(m) {
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
+  const leagueIds = FIXTURE_LEAGUE_FILTERS[state.fixtureFilter];
   const upcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
     .filter((m) => isSameLocalDay(m.Date, today))
+    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
     .sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
   if (!upcoming.length) {
@@ -573,6 +600,15 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
     btn.setAttribute("aria-selected", "true");
     const tab = btn.dataset.tab;
     document.querySelectorAll(".panel").forEach((p) => p.dataset.active = String(p.dataset.tab === tab));
+  });
+});
+
+document.querySelectorAll("#fixture-filters .filter-chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#fixture-filters .filter-chip").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.fixtureFilter = btn.dataset.filter;
+    renderFixtures();
   });
 });
 
