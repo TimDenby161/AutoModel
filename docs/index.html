@@ -324,6 +324,9 @@
             <th class="num sortable" data-key="goals">G</th>
             <th class="num sortable" data-key="assists">A</th>
             <th class="num sortable" data-key="ability">AB</th>
+            <th class="num sortable" data-key="minutes">Mins</th>
+            <th class="num sortable" data-key="xg">xG</th>
+            <th class="num sortable" data-key="xa">xA</th>
           </tr>
         </thead>
         <tbody id="leaderboard-body"></tbody>
@@ -609,6 +612,8 @@ function playerRow(p) {
     assists: toNum(p.Assists),
     ability: toNum(p.Ability),
     minutes: toNum(p.Minutes),
+    xg: toNum(p.xG),
+    xa: toNum(p.xA),
   };
 }
 
@@ -616,7 +621,7 @@ function renderLeaderboard() {
   const body = document.getElementById("leaderboard-body");
   const query = document.getElementById("player-search").value.trim().toLowerCase();
 
-  let rows = state.players.map(playerRow).filter((r) => r.minutes > 0 || r.rating > 0);
+  let rows = state.players.map(playerRow);
   if (query) {
     rows = rows.filter((r) =>
       r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
@@ -626,7 +631,7 @@ function renderLeaderboard() {
   rows = rows.slice(0, 100);
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">No matching players.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="8"><div class="empty-state">No matching players.</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map((r) => `
@@ -639,6 +644,9 @@ function renderLeaderboard() {
       <td class="num">${r.goals}</td>
       <td class="num">${r.assists}</td>
       <td class="num">${r.ability}</td>
+      <td class="num">${r.minutes}</td>
+      <td class="num">${r.xg.toFixed(2)}</td>
+      <td class="num">${r.xa.toFixed(2)}</td>
     </tr>
   `).join("");
 }
