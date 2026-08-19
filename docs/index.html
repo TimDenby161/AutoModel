@@ -168,6 +168,11 @@
     font-variant-numeric: tabular-nums;
     font-size: 13px; font-weight: 700;
   }
+  .match-score-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .match-score-sub {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
   .match-probs { margin-top: 8px; }
   .prob-bar {
     display: flex; gap: 2px; height: 6px;
@@ -190,17 +195,6 @@
   .prob-labels .prob-home { color: var(--series-blue); }
   .prob-labels .prob-draw { color: var(--text-muted); }
   .prob-labels .prob-away { color: var(--series-orange); }
-  .result-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
-    margin-top: 6px;
-  }
-  .result-pill.win { color: var(--status-good); }
-  .result-pill.loss { color: var(--status-critical); }
-  .result-pill.draw { color: var(--text-muted); }
-  .result-pill .dot {
-    width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block;
-  }
 
   .filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .filter-chip {
@@ -523,14 +517,15 @@ function finalScoreCenter(m) {
   `;
 }
 
-function resultPill(m) {
-  const home = toNum(m["Home Score"]);
-  const away = toNum(m["Away Score"]);
-  const result = m.Result || "";
-  let cls = "draw", label = "Draw", glyph = "&#9679;";
-  if (result === "Home Win") { cls = "win"; label = `${escapeHtml(m["Home Club"])} won`; }
-  else if (result === "Away Win") { cls = "win"; label = `${escapeHtml(m["Away Club"])} won`; }
-  return `<span class="result-pill ${cls}"><span class="dot"></span>${label}</span>`;
+// Results (MatchData) doesn't carry ProjH/ProjA or the club-score rating -
+// those only live on the Matches tab (state.fixtures), keyed by the same
+// "Match ID" both tabs share.
+function projScoreSub(matchRow) {
+  if (!matchRow) return "";
+  const projH = parseFloat(matchRow.ProjH);
+  const projA = parseFloat(matchRow.ProjA);
+  if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
+  return `<div class="match-score-sub">Proj ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
 }
 
 function renderResults() {
@@ -546,20 +541,32 @@ function renderResults() {
     container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
     return;
   }
-  container.innerHTML = recent.map((m) => `
+  const fixturesById = new Map(state.fixtures.map((f) => [f["Match ID"], f]));
+  container.innerHTML = recent.map((m) => {
+    const matchRow = fixturesById.get(m["Match ID"]);
+    return `
     <div class="match-card">
       <div class="match-comp">
         <span>${escapeHtml(m.Competition || "")}</span>
         <span>${escapeHtml(formatKickoff(m["Match UTC"]))}</span>
       </div>
       <div class="match-teams">
-        <div class="match-team">${escapeHtml(m["Home Club"])}</div>
-        ${finalScoreCenter(m)}
-        <div class="match-team away">${escapeHtml(m["Away Club"])}</div>
+        <div class="match-team">
+          ${escapeHtml(m["Home Club"])}
+          ${clubScoreLabel(matchRow && matchRow.HomeScr)}
+        </div>
+        <div class="match-score-col">
+          ${finalScoreCenter(m)}
+          ${projScoreSub(matchRow)}
+        </div>
+        <div class="match-team away">
+          ${escapeHtml(m["Away Club"])}
+          ${clubScoreLabel(matchRow && matchRow.AwayScr)}
+        </div>
       </div>
-      ${resultPill(m)}
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function playerRow(p) {
