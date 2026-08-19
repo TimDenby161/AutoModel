@@ -369,11 +369,10 @@
 // "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
-  // "Data" tab: a QUERY(Players!...) formula pulling just the columns the
-  // leaderboard needs (Position/Name/Age/Club/Ability/Goals/Assists/Rating/
-  // Minutes/xG/NPxG/xA) - a few hundred KB instead of PlayerData's full
-  // 700+ column, ~10MB export.
-  leaderboardCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=209002649&single=true&output=csv",
+  // "Players" tab directly (the Data tab - a QUERY(Players!...) formula -
+  // was deleted). Full 700+ column export, but playerRow() below only
+  // reads the ~12 fields the leaderboard needs.
+  leaderboardCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=777765661&single=true&output=csv",
   // Fixtures and Results are both driven from this one "Matches" tab -
   // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
   // and the club-score rating (HomeScr/AwayScr) all in one place.
@@ -670,19 +669,26 @@ function renderResults() {
   `).join("");
 }
 
+// Reads straight from the Players tab (the Data tab it used to come from
+// - a QUERY(Players!...) formula - was deleted). Players' own headers are
+// terse and some repeat (a general/overview stat then the current-season
+// one), so parseCsvWithHeaderRow's dedup renames the second occurrence
+// with a "_1" suffix - Mins/xG/NPxG/xA all need that suffixed name, not
+// the plain one, to hit the current-season column instead of the earlier
+// overview column sharing the same header text.
 function playerRow(p) {
   return {
     name: p.Name || "",
     club: p.Club || "",
-    position: p.Position || "",
+    position: p.POS || "",
     age: toNum(p.Age),
-    rating: toNum(p.Rating),
-    goals: toNum(p.Goals),
-    assists: toNum(p.Assists),
-    ability: toNum(p.Ability),
-    minutes: toNum(p.Minutes),
-    xg: toNum(p.xG),
-    xa: toNum(p.xA),
+    rating: toNum(p.RAT),
+    goals: toNum(p.G),
+    assists: toNum(p.A),
+    ability: toNum(p.AB),
+    minutes: toNum(p.Mins_1),
+    xg: toNum(p.xG_1),
+    xa: toNum(p.xA_1),
   };
 }
 
@@ -846,7 +852,7 @@ async function loadData() {
         showLoadErrorCard(document.getElementById("results-list"), "results");
         throw err;
       }),
-    fetchWithRetry(() => parseCsv(CONFIG.leaderboardCsvUrl), "Leaderboard")
+    fetchWithRetry(() => parseCsvWithHeaderRow(CONFIG.leaderboardCsvUrl, 1), "Leaderboard")
       .then((players) => {
         state.players = players;
         renderLeaderboard();
