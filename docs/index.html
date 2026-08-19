@@ -777,11 +777,29 @@ function renderFpl() {
   `).join("");
 }
 
-function renderAll() {
-  renderFixtures();
-  renderResults();
-  renderFpl();
-  renderLeaderboard();
+// Google's publish-to-web CSV export is occasionally slow or outright
+// hangs for minutes. Each tab's data is fetched and rendered independently
+// (not one big Promise.all) so a stuck FPL fetch, say, can't leave
+// Fixtures/Results/Leaders stuck on "Loading..." forever too - and a hard
+// timeout means a hung request eventually surfaces as an error instead of
+// spinning indefinitely.
+const FETCH_TIMEOUT_MS = 30000;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
+function showLoadErrorCard(container, label) {
+  container.innerHTML = `<div class="empty-state">Failed to load ${label}. Try Refresh.</div>`;
+}
+
+function showLoadErrorRow(tbody, colspan, label) {
+  tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="empty-state">Failed to load ${label}. Try Refresh.</div></td></tr>`;
 }
 
 async function loadData() {
@@ -795,24 +813,51 @@ async function loadData() {
   }
   const btn = document.getElementById("refresh-btn");
   btn.dataset.loading = "true";
-  setStatus("Loading&hellip;");
-  try {
-    const [players, fixtures, fpl] = await Promise.all([
-      parseCsv(CONFIG.leaderboardCsvUrl),
-      parseCsv(CONFIG.matchesTabCsvUrl),
-      parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1),
-    ]);
-    state.players = players;
-    state.fixtures = fixtures;
-    state.fpl = fpl;
-    renderAll();
-    setStatus("Updated " + new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
-  } catch (err) {
-    setStatus("Failed to load data");
-    console.error(err);
-  } finally {
-    btn.dataset.loading = "false";
-  }
+  setStatus("Loading…");
+
+  const tasks = [
+    withTimeout(parseCsv(CONFIG.matchesTabCsvUrl), FETCH_TIMEOUT_MS, "Matches")
+      .then((fixtures) => {
+        state.fixtures = fixtures;
+        renderFixtures();
+        renderResults();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorCard(document.getElementById("fixtures-list"), "fixtures");
+        showLoadErrorCard(document.getElementById("results-list"), "results");
+        throw err;
+      }),
+    withTimeout(parseCsv(CONFIG.leaderboardCsvUrl), FETCH_TIMEOUT_MS, "Leaderboard")
+      .then((players) => {
+        state.players = players;
+        renderLeaderboard();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorRow(document.getElementById("leaderboard-body"), 8, "the leaderboard");
+        throw err;
+      }),
+    withTimeout(parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1), FETCH_TIMEOUT_MS, "FPL")
+      .then((fpl) => {
+        state.fpl = fpl;
+        renderFpl();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorRow(document.getElementById("fpl-body"), 10, "FPL data");
+        throw err;
+      }),
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  const failedCount = results.filter((r) => r.status === "rejected").length;
+  setStatus(
+    failedCount === 0
+      ? "Updated " + new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+      : `Updated with ${failedCount} error${failedCount > 1 ? "s" : ""}`
+  );
+  btn.dataset.loading = "false";
 }
 
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
