@@ -272,6 +272,12 @@
   </section>
 
   <section class="panel" data-tab="results">
+    <div class="filter-row" id="result-filters">
+      <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="filter-chip" data-filter="pl" aria-pressed="false">Premier League</button>
+      <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
+      <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
+    </div>
     <div id="results-list" class="card-list"></div>
   </section>
 
@@ -314,10 +320,14 @@ const CONFIG = {
 };
 // -------------------------------------------------------------------
 
-const state = { matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1, fixtureFilter: "all" };
+const state = {
+  matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1,
+  fixtureFilter: "all", resultFilter: "all",
+};
 
-// League IDs (the Matches tab's "ID" column, immediately left of "League").
-const FIXTURE_LEAGUE_FILTERS = {
+// League IDs - the Matches tab's "ID" column (immediately left of "League")
+// and MatchData's "Competition ID" column use the same numbering.
+const LEAGUE_FILTERS = {
   all: null,
   pl: ["47"],
   l2: ["109"],
@@ -452,7 +462,7 @@ const FIXTURES_LOOKAHEAD_ROUNDS = 2;
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
-  const leagueIds = FIXTURE_LEAGUE_FILTERS[state.fixtureFilter];
+  const leagueIds = LEAGUE_FILTERS[state.fixtureFilter];
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const allUpcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
@@ -500,6 +510,16 @@ function renderFixtures() {
   `).join("");
 }
 
+function finalScoreCenter(m) {
+  return `
+    <div class="match-score has-proj">
+      <span class="proj-box">${escapeHtml(m["Home Score"])}</span>
+      <span class="vs-text">&ndash;</span>
+      <span class="proj-box">${escapeHtml(m["Away Score"])}</span>
+    </div>
+  `;
+}
+
 function resultPill(m) {
   const home = toNum(m["Home Score"]);
   const away = toNum(m["Away Score"]);
@@ -512,8 +532,10 @@ function resultPill(m) {
 
 function renderResults() {
   const container = document.getElementById("results-list");
+  const leagueIds = LEAGUE_FILTERS[state.resultFilter];
   const recent = state.matches
     .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m["Match UTC"])
+    .filter((m) => !leagueIds || leagueIds.includes(String(m["Competition ID"])))
     .sort((a, b) => new Date(b["Match UTC"]) - new Date(a["Match UTC"]))
     .slice(0, CONFIG.resultsCount);
 
@@ -529,7 +551,7 @@ function renderResults() {
       </div>
       <div class="match-teams">
         <div class="match-team">${escapeHtml(m["Home Club"])}</div>
-        <div class="match-score">${escapeHtml(m["Home Score"])}&ndash;${escapeHtml(m["Away Score"])}</div>
+        ${finalScoreCenter(m)}
         <div class="match-team away">${escapeHtml(m["Away Club"])}</div>
       </div>
       ${resultPill(m)}
@@ -632,6 +654,15 @@ document.querySelectorAll("#fixture-filters .filter-chip").forEach((btn) => {
     btn.setAttribute("aria-pressed", "true");
     state.fixtureFilter = btn.dataset.filter;
     renderFixtures();
+  });
+});
+
+document.querySelectorAll("#result-filters .filter-chip").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#result-filters .filter-chip").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.resultFilter = btn.dataset.filter;
+    renderResults();
   });
 });
 
