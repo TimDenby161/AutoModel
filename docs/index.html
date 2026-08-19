@@ -151,7 +151,7 @@
   }
   .match-team.away .club-score { margin-left: auto; }
   .match-score {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: flex-start; gap: 6px;
     font-size: 13px; font-weight: 700;
     white-space: nowrap; flex-shrink: 0;
   }
@@ -159,7 +159,7 @@
     color: var(--text-muted); font-size: 12px; font-weight: 600;
     padding: 2px 6px;
   }
-  .match-score.has-proj .vs-text { padding: 0; }
+  .match-score.has-proj .vs-text { padding: 4px 0 0; }
   .proj-box {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 28px; padding: 3px 6px; border-radius: 6px;
@@ -168,7 +168,7 @@
     font-variant-numeric: tabular-nums;
     font-size: 13px; font-weight: 700;
   }
-  .match-score-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .score-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
   .match-score-sub {
     font-size: 11px; font-weight: 600; color: var(--text-muted);
     font-variant-numeric: tabular-nums;
@@ -503,21 +503,26 @@ function renderFixtures() {
   `).join("");
 }
 
+function projScoreSub(raw) {
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n)) return "";
+  return `<div class="match-score-sub">${n.toFixed(1)}</div>`;
+}
+
 function finalScoreCenter(m) {
   return `
     <div class="match-score has-proj">
-      <span class="proj-box">${escapeHtml(m.HomeS)}</span>
+      <div class="score-col">
+        <span class="proj-box">${escapeHtml(m.HomeS)}</span>
+        ${projScoreSub(m.ProjH)}
+      </div>
       <span class="vs-text">&ndash;</span>
-      <span class="proj-box">${escapeHtml(m.AwayS)}</span>
+      <div class="score-col">
+        <span class="proj-box">${escapeHtml(m.AwayS)}</span>
+        ${projScoreSub(m.ProjA)}
+      </div>
     </div>
   `;
-}
-
-function projScoreSub(m) {
-  const projH = parseFloat(m.ProjH);
-  const projA = parseFloat(m.ProjA);
-  if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
-  return `<div class="match-score-sub">Proj ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
 }
 
 function renderResults() {
@@ -544,10 +549,7 @@ function renderResults() {
           ${escapeHtml(m.Home)}
           ${clubScoreLabel(m.HomeScr)}
         </div>
-        <div class="match-score-col">
-          ${finalScoreCenter(m)}
-          ${projScoreSub(m)}
-        </div>
+        ${finalScoreCenter(m)}
         <div class="match-team away">
           ${escapeHtml(m.Away)}
           ${clubScoreLabel(m.AwayScr)}
