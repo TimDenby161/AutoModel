@@ -441,21 +441,44 @@ function matchProbsRow(m) {
   `;
 }
 
+// Round-ahead fallback: leagues go quiet between rounds (or a whole
+// season hasn't kicked off yet), so "today" is often empty even though
+// the filter is otherwise valid. Rather than a bare empty state, fall
+// back to the next couple of rounds - grouped by League ID + Round so
+// mixed-league filters (e.g. English Teams) don't conflate one league's
+// "Round 1" with another's.
+const FIXTURES_LOOKAHEAD_ROUNDS = 2;
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
   const leagueIds = FIXTURE_LEAGUE_FILTERS[state.fixtureFilter];
-  const upcoming = state.fixtures
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const allUpcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
-    .filter((m) => isSameLocalDay(m.Date, today))
+    .filter((m) => new Date(m.Date) >= todayStart)
     .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
     .sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
+  let upcoming = allUpcoming.filter((m) => isSameLocalDay(m.Date, today));
+  let note = "";
+
+  if (!upcoming.length && allUpcoming.length) {
+    const roundKeys = [];
+    for (const m of allUpcoming) {
+      const key = `${m.ID}|${m.Round}`;
+      if (!roundKeys.includes(key)) roundKeys.push(key);
+      if (roundKeys.length >= FIXTURES_LOOKAHEAD_ROUNDS) break;
+    }
+    upcoming = allUpcoming.filter((m) => roundKeys.includes(`${m.ID}|${m.Round}`));
+    note = `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing the next rounds.</div>`;
+  }
+
   if (!upcoming.length) {
-    container.innerHTML = `<div class="empty-state">No fixtures today.</div>`;
+    container.innerHTML = `<div class="empty-state">No fixtures found.</div>`;
     return;
   }
-  container.innerHTML = upcoming.map((m) => `
+  container.innerHTML = note + upcoming.map((m) => `
     <div class="match-card">
       <div class="match-comp">
         <span>${escapeHtml(m.League || "")}</span>
