@@ -365,9 +365,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--snapshot-data",
         action="store_true",
-        help="Like --snapshot-matches, but for the Data tab (the leaderboard's slim QUERY view).",
+        help=(
+            "Fetch the Players tab's own published CSV and write the "
+            "leaderboard's ~12-column projection into a new DataSnapshot "
+            "tab - same approach as --snapshot-matches, and replaces the "
+            "old Data tab (a QUERY(Players!...) formula) entirely."
+        ),
     )
-    parser.add_argument("--data-worksheet", default="Data")
+    parser.add_argument(
+        "--players-csv-url",
+        default=(
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs"
+            "/pub?gid=777765661&single=true&output=csv"
+        ),
+        help="Published CSV URL for the Players tab",
+    )
     parser.add_argument("--data-snapshot-worksheet", default="DataSnapshot")
     return parser.parse_args()
 
@@ -541,25 +553,6 @@ def write_static_rows(
         safe_print(f"{destination_worksheet_name}: wrote rows {start + 1:,}-{end_row:,} of {num_rows:,}")
 
 
-def sync_static_snapshot(
-    spreadsheet,
-    source_worksheet_name: str,
-    destination_worksheet_name: str,
-    sheet_batch_size: int,
-) -> None:
-    """Copy `source_worksheet_name`'s current computed values - any formula
-    flattened to its result, via the same UNFORMATTED_VALUE read used
-    elsewhere - wholesale into `destination_worksheet_name`. Only ever reads
-    from the source; never touches it. Fine for a small, dateless tab like
-    Data; for Matches, use sync_matches_snapshot instead (see there for why).
-    """
-    source = spreadsheet.worksheet(source_worksheet_name)
-    values = read_existing_values(
-        source, f"Read {source_worksheet_name} for {destination_worksheet_name} snapshot"
-    )
-    write_static_rows(spreadsheet, destination_worksheet_name, values, sheet_batch_size)
-
-
 # Matches columns actually read by the dashboard (docs/index.html), by
 # 0-based index in the Matches tab's own published CSV. Far fewer than all
 # 43 columns, both because most aren't used and because Matches' 17,000+
@@ -599,12 +592,11 @@ def sync_matches_snapshot(
     destination_worksheet_name: str,
     sheet_batch_size: int,
 ) -> None:
-    """Like sync_static_snapshot, but for Matches specifically: fetches
-    Matches' own published CSV (the same URL the dashboard already reads
-    and correctly parses) instead of reading via the Sheets API, and
-    projects down to MATCHES_SNAPSHOT_COLUMNS.
+    """Fetches Matches' own published CSV (the same URL the dashboard
+    already reads and correctly parses) rather than reading via the Sheets
+    API, and projects down to MATCHES_SNAPSHOT_COLUMNS.
 
-    Two reasons this can't just be sync_static_snapshot:
+    Two reasons it's built this way instead of a plain 1:1 Sheets-API copy:
     1. Cell budget - Matches is 17,000+ rows x 43 columns; this workbook is
        already near Google's 10M-cell-per-workbook cap, so a full 1:1 copy
        doesn't fit, but a ~17-column projection does.
@@ -625,6 +617,42 @@ def sync_matches_snapshot(
     indices = list(MATCHES_SNAPSHOT_COLUMNS.values())
     projected = [headers] + [
         [row[i] if i < len(row) else "" for i in indices] for row in rows[1:]
+    ]
+    write_static_rows(spreadsheet, destination_worksheet_name, projected, sheet_batch_size)
+
+
+# Leaderboard columns, by 0-based index in the Players tab's own published
+# CSV - the exact letters given for the leaderboard (B/C/D/H/W/EN/EO/EP/ER/
+# ES/ET/EU), confirmed against real header text. Players' CSV has a
+# two-row header (a blank/merged group-label row above the real one), so
+# data starts at row index 2, not 1.
+PLAYERS_SNAPSHOT_COLUMNS = {
+    "Position": 1, "Name": 2, "Age": 3, "Club": 7, "Ability": 22,
+    "Goals": 143, "Assists": 144, "Rating": 145, "Minutes": 147,
+    "xG": 148, "NPxG": 149, "xA": 150,
+}
+
+
+def sync_players_snapshot(
+    spreadsheet,
+    players_csv_url: str,
+    destination_worksheet_name: str,
+    sheet_batch_size: int,
+) -> None:
+    """Fetches the Players tab's own published CSV and projects down to
+    PLAYERS_SNAPSHOT_COLUMNS for the leaderboard - same approach as
+    sync_matches_snapshot, and replaces the old Data tab (a QUERY(Players!
+    ...) formula) entirely, since this Python projection does the same job
+    without needing a formula tab in between."""
+    rows = fetch_csv_rows(players_csv_url)
+    if len(rows) < 3:
+        safe_print("Players CSV came back empty; skipping snapshot.")
+        return
+
+    headers = list(PLAYERS_SNAPSHOT_COLUMNS.keys())
+    indices = list(PLAYERS_SNAPSHOT_COLUMNS.values())
+    projected = [headers] + [
+        [row[i] if i < len(row) else "" for i in indices] for row in rows[2:]
     ]
     write_static_rows(spreadsheet, destination_worksheet_name, projected, sheet_batch_size)
 
@@ -1741,8 +1769,8 @@ def main() -> int:
             safe_print(f"MatchesSnapshot failed: {exc}")
     if args.snapshot_data:
         try:
-            sync_static_snapshot(
-                spreadsheet, args.data_worksheet, args.data_snapshot_worksheet, args.sheet_batch_size
+            sync_players_snapshot(
+                spreadsheet, args.players_csv_url, args.data_snapshot_worksheet, args.sheet_batch_size
             )
         except Exception as exc:  # noqa: BLE001
             safe_print(f"DataSnapshot failed: {exc}")
