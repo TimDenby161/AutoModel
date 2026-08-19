@@ -300,14 +300,14 @@
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
-// on the MatchData and PlayerData tabs (CSV format, specific sheet, not
+// on the PlayerData and Matches tabs (CSV format, specific sheet, not
 // "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
-  matchDataCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1923587290&single=true&output=csv",
   playerDataCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1325393950&single=true&output=csv",
-  // "Matches" tab (not MatchData) - has the ProjH/ProjA expected-score
-  // projection columns the MatchData tab doesn't.
+  // Fixtures and Results are both driven from this one "Matches" tab -
+  // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
+  // and the club-score rating (HomeScr/AwayScr) all in one place.
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
   currentSeason: 2027,
   resultsCount: 15,
@@ -315,15 +315,11 @@ const CONFIG = {
 // -------------------------------------------------------------------
 
 const state = {
-  matches: [], players: [], fixtures: [], sortKey: "rating", sortDir: -1,
+  players: [], fixtures: [], sortKey: "rating", sortDir: -1,
   fixtureFilter: "all", resultFilter: "all",
 };
 
-// League IDs - the Matches tab's "ID" column and MatchData's "Parent
-// Competition ID" use the same numbering. MatchData's own "Competition ID"
-// isn't usable here: finished rounds get a distinct per-round sub-ID
-// (e.g. League Two's round 1 becomes 938220) while "Parent Competition ID"
-// stays fixed at 109 for every round.
+// League IDs - the Matches tab's "ID" column (immediately left of "League").
 const LEAGUE_FILTERS = {
   all: null,
   pl: ["47"],
@@ -338,7 +334,7 @@ function setStatus(text) {
 function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
     This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
-    in the repo, fill in <code>CONFIG.matchDataCsvUrl</code> and
+    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code> and
     <code>CONFIG.playerDataCsvUrl</code> with the links from Google Sheets'
     <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
     at a time), then commit.
@@ -510,20 +506,16 @@ function renderFixtures() {
 function finalScoreCenter(m) {
   return `
     <div class="match-score has-proj">
-      <span class="proj-box">${escapeHtml(m["Home Score"])}</span>
+      <span class="proj-box">${escapeHtml(m.HomeS)}</span>
       <span class="vs-text">&ndash;</span>
-      <span class="proj-box">${escapeHtml(m["Away Score"])}</span>
+      <span class="proj-box">${escapeHtml(m.AwayS)}</span>
     </div>
   `;
 }
 
-// Results (MatchData) doesn't carry ProjH/ProjA or the club-score rating -
-// those only live on the Matches tab (state.fixtures), keyed by the same
-// "Match ID" both tabs share.
-function projScoreSub(matchRow) {
-  if (!matchRow) return "";
-  const projH = parseFloat(matchRow.ProjH);
-  const projA = parseFloat(matchRow.ProjA);
+function projScoreSub(m) {
+  const projH = parseFloat(m.ProjH);
+  const projA = parseFloat(m.ProjA);
   if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
   return `<div class="match-score-sub">Proj ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
 }
@@ -531,42 +523,38 @@ function projScoreSub(matchRow) {
 function renderResults() {
   const container = document.getElementById("results-list");
   const leagueIds = LEAGUE_FILTERS[state.resultFilter];
-  const recent = state.matches
-    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m["Match UTC"])
-    .filter((m) => !leagueIds || leagueIds.includes(String(m["Parent Competition ID"])))
-    .sort((a, b) => new Date(b["Match UTC"]) - new Date(a["Match UTC"]))
+  const recent = state.fixtures
+    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date)
+    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
+    .sort((a, b) => new Date(b.Date) - new Date(a.Date))
     .slice(0, CONFIG.resultsCount);
 
   if (!recent.length) {
     container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
     return;
   }
-  const fixturesById = new Map(state.fixtures.map((f) => [f["Match ID"], f]));
-  container.innerHTML = recent.map((m) => {
-    const matchRow = fixturesById.get(m["Match ID"]);
-    return `
+  container.innerHTML = recent.map((m) => `
     <div class="match-card">
       <div class="match-comp">
-        <span>${escapeHtml(m.Competition || "")}</span>
-        <span>${escapeHtml(formatKickoff(m["Match UTC"]))}</span>
+        <span>${escapeHtml(m.League || "")}</span>
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
       </div>
       <div class="match-teams">
         <div class="match-team">
-          ${escapeHtml(m["Home Club"])}
-          ${clubScoreLabel(matchRow && matchRow.HomeScr)}
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.HomeScr)}
         </div>
         <div class="match-score-col">
           ${finalScoreCenter(m)}
-          ${projScoreSub(matchRow)}
+          ${projScoreSub(m)}
         </div>
         <div class="match-team away">
-          ${escapeHtml(m["Away Club"])}
-          ${clubScoreLabel(matchRow && matchRow.AwayScr)}
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.AwayScr)}
         </div>
       </div>
     </div>
-  `;
-  }).join("");
+  `).join("");
 }
 
 function playerRow(p) {
@@ -620,7 +608,7 @@ function renderAll() {
 }
 
 async function loadData() {
-  if (!CONFIG.matchDataCsvUrl || !CONFIG.playerDataCsvUrl || !CONFIG.matchesTabCsvUrl) {
+  if (!CONFIG.playerDataCsvUrl || !CONFIG.matchesTabCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("leaderboard-body").innerHTML = "";
@@ -631,12 +619,10 @@ async function loadData() {
   btn.dataset.loading = "true";
   setStatus("Loading&hellip;");
   try {
-    const [matches, players, fixtures] = await Promise.all([
-      parseCsv(CONFIG.matchDataCsvUrl),
+    const [players, fixtures] = await Promise.all([
       parseCsv(CONFIG.playerDataCsvUrl),
       parseCsv(CONFIG.matchesTabCsvUrl),
     ]);
-    state.matches = matches;
     state.players = players;
     state.fixtures = fixtures;
     renderAll();
