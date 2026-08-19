@@ -142,9 +142,14 @@
   .match-team { flex: 1; font-size: 14px; font-weight: 600; }
   .match-team.away { text-align: right; }
   .club-score {
-    font-size: 11px; font-weight: 600; color: var(--text-muted);
-    margin-top: 2px; font-variant-numeric: tabular-nums;
+    display: block; width: fit-content; margin-top: 2px;
+    padding: 2px 6px; border-radius: 6px;
+    background: color-mix(in srgb, var(--series-blue) 16%, transparent);
+    color: var(--series-blue);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px; font-weight: 700;
   }
+  .match-team.away .club-score { margin-left: auto; }
   .match-score {
     display: flex; align-items: center; gap: 6px;
     font-size: 13px; font-weight: 700;
