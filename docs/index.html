@@ -173,13 +173,18 @@
   .prob-draw { background: var(--text-muted); }
   .prob-away { background: var(--series-orange); }
   .prob-labels {
-    display: flex; justify-content: space-between;
-    margin-top: 4px; font-size: 11px; font-weight: 600;
+    position: relative; height: 14px; margin-top: 4px;
+    font-size: 11px; font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
-  .prob-labels .prob-home { background: none; color: var(--series-blue); }
-  .prob-labels .prob-draw { background: none; color: var(--text-muted); }
-  .prob-labels .prob-away { background: none; color: var(--series-orange); }
+  .prob-labels span {
+    position: absolute; top: 0; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    white-space: nowrap; background: none;
+  }
+  .prob-labels .prob-home { color: var(--series-blue); }
+  .prob-labels .prob-draw { color: var(--text-muted); }
+  .prob-labels .prob-away { color: var(--series-orange); }
   .result-pill {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
@@ -388,6 +393,8 @@ function matchProbsRow(m) {
   const pctHw = Math.round(hw * 100);
   const pctDraw = Math.round(draw * 100);
   const pctAw = Math.round(aw * 100);
+  const drawStart = pctHw;
+  const awayStart = pctHw + pctDraw;
   return `
     <div class="match-probs">
       <div class="prob-bar">
@@ -396,9 +403,9 @@ function matchProbsRow(m) {
         <span class="prob-away" style="width:${pctAw}%"></span>
       </div>
       <div class="prob-labels">
-        <span class="prob-home">${pctHw}%</span>
-        <span class="prob-draw">${pctDraw}%</span>
-        <span class="prob-away">${pctAw}%</span>
+        <span class="prob-home" style="left:0%; width:${pctHw}%">${pctHw}%</span>
+        <span class="prob-draw" style="left:${drawStart}%; width:${pctDraw}%">${pctDraw}%</span>
+        <span class="prob-away" style="left:${awayStart}%; width:${pctAw}%">${pctAw}%</span>
       </div>
     </div>
   `;
