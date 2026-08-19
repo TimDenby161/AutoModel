@@ -142,13 +142,22 @@
   .match-team { flex: 1; font-size: 14px; font-weight: 600; }
   .match-team.away { text-align: right; }
   .match-score {
-    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
-    padding: 2px 10px; border-radius: 6px; background: var(--chip-bg);
-    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 700;
+    white-space: nowrap; flex-shrink: 0;
   }
-  .projection-line {
-    margin-top: 6px; font-size: 12px; color: var(--text-secondary);
+  .match-score .vs-text {
+    color: var(--text-muted); font-size: 12px; font-weight: 600;
+    padding: 2px 6px;
+  }
+  .match-score.has-proj .vs-text { padding: 0; }
+  .proj-box {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; padding: 3px 6px; border-radius: 6px;
+    background: color-mix(in srgb, var(--series-blue) 16%, transparent);
+    color: var(--series-blue);
     font-variant-numeric: tabular-nums;
+    font-size: 13px; font-weight: 700;
   }
   .result-pill {
     display: inline-flex; align-items: center; gap: 4px;
@@ -306,13 +315,6 @@ function formatKickoff(iso) {
   });
 }
 
-function projectionLine(m) {
-  const projH = parseFloat(m.ProjH);
-  const projA = parseFloat(m.ProjA);
-  if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
-  return `<div class="projection-line">Projected ${projH.toFixed(1)}&ndash;${projA.toFixed(1)}</div>`;
-}
-
 function isSameLocalDay(dateStr, reference) {
   const d = new Date(dateStr);
   return (
@@ -320,6 +322,21 @@ function isSameLocalDay(dateStr, reference) {
     d.getMonth() === reference.getMonth() &&
     d.getDate() === reference.getDate()
   );
+}
+
+function matchScoreCenter(m) {
+  const projH = parseFloat(m.ProjH);
+  const projA = parseFloat(m.ProjA);
+  if (!Number.isFinite(projH) || !Number.isFinite(projA)) {
+    return `<div class="match-score"><span class="vs-text">vs</span></div>`;
+  }
+  return `
+    <div class="match-score has-proj">
+      <span class="proj-box">${projH.toFixed(1)}</span>
+      <span class="vs-text">vs</span>
+      <span class="proj-box">${projA.toFixed(1)}</span>
+    </div>
+  `;
 }
 
 function renderFixtures() {
@@ -342,10 +359,9 @@ function renderFixtures() {
       </div>
       <div class="match-teams">
         <div class="match-team">${escapeHtml(m.Home)}</div>
-        <div class="match-score">vs</div>
+        ${matchScoreCenter(m)}
         <div class="match-team away">${escapeHtml(m.Away)}</div>
       </div>
-      ${projectionLine(m)}
     </div>
   `).join("");
 }
