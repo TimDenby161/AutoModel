@@ -256,6 +256,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
     <button role="tab" data-tab="results" aria-selected="false">Results</button>
+    <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
     <button role="tab" data-tab="leaderboard" aria-selected="false">Leaders</button>
   </nav>
 </header>
@@ -311,12 +312,37 @@
     <div id="results-list" class="card-list"></div>
   </section>
 
+  <section class="panel" data-tab="fpl">
+    <div class="search-row">
+      <input id="fpl-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="leaderboard" id="fpl-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th class="num sortable" data-key="price">Price</th>
+            <th class="num sortable" data-key="mins">Mins</th>
+            <th class="num sortable" data-key="xpts">xPts</th>
+            <th class="num sortable" data-key="gw2">2GW</th>
+            <th class="num sortable" data-key="gw5">5GW</th>
+            <th class="num sortable" data-key="gw6">6GW</th>
+            <th class="num sortable" data-key="xg">xG</th>
+            <th class="num sortable" data-key="xa">xA</th>
+            <th class="num sortable" data-key="def">Def</th>
+          </tr>
+        </thead>
+        <tbody id="fpl-body"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel" data-tab="leaderboard">
     <div class="search-row">
       <input id="player-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
     </div>
     <div style="overflow-x:auto;">
-      <table class="leaderboard">
+      <table class="leaderboard" id="leaderboard-table">
         <thead>
           <tr>
             <th>Player</th>
@@ -339,7 +365,7 @@
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
-// on the Data and Matches tabs (CSV format, specific sheet, not
+// on the Data, Matches, and FPL tabs (CSV format, specific sheet, not
 // "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
@@ -352,12 +378,14 @@ const CONFIG = {
   // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
   // and the club-score rating (HomeScr/AwayScr) all in one place.
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
+  fplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=416026226&single=true&output=csv",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
 const state = {
-  players: [], fixtures: [], sortKey: "rating", sortDir: -1,
+  players: [], fixtures: [], fpl: [], sortKey: "rating", sortDir: -1,
+  fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all",
 };
 
@@ -386,8 +414,9 @@ function setStatus(text) {
 function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
     This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
-    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code> and
-    <code>CONFIG.leaderboardCsvUrl</code> with the links from Google Sheets'
+    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code>,
+    <code>CONFIG.leaderboardCsvUrl</code>, and <code>CONFIG.fplCsvUrl</code>
+    with the links from Google Sheets'
     <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
     at a time), then commit.
   </div>`;
@@ -400,6 +429,46 @@ function parseCsv(url) {
       header: true,
       skipEmptyLines: true,
       complete: (results) => resolve(results.data),
+      error: reject,
+    });
+  });
+}
+
+// The FPL tab has a merged group-label row above its real header row (e.g.
+// "xPts" spans columns P-Y, whose actual headers are just "1".."10") - a
+// plain header:true parse would treat that group-label row as the headers
+// instead. Parse without a header, then build objects from row index
+// `headerRow` ourselves, keeping the first occurrence of a repeated name
+// (e.g. the "1".."10" block appears nine times) as the plain key and only
+// suffixing later duplicates, so p["1"]/p.Pos etc. hit the intended column.
+function parseCsvWithHeaderRow(url, headerRow) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: false,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = results.data;
+        const seen = new Map();
+        const keys = rows[headerRow].map((h, i) => {
+          let key = (h || "").trim() || `col${i}`;
+          if (seen.has(key)) {
+            const count = seen.get(key) + 1;
+            seen.set(key, count);
+            key = `${key}_${count}`;
+          } else {
+            seen.set(key, 0);
+          }
+          return key;
+        });
+        resolve(
+          rows.slice(headerRow + 1).map((row) => {
+            const obj = {};
+            keys.forEach((k, i) => { obj[k] = row[i]; });
+            return obj;
+          })
+        );
+      },
       error: reject,
     });
   });
@@ -651,16 +720,75 @@ function renderLeaderboard() {
   `).join("");
 }
 
+// Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
+// (expected defensive duels/actions), midfielders and strikers get xDM.
+function fplRow(p) {
+  const pos = p.Pos || "";
+  const defStat = pos === "D" ? toNum(p.xDD) : (pos === "M" || pos === "F") ? toNum(p.xDM) : null;
+  return {
+    name: p.Name || "",
+    club: p.Club || "",
+    pos,
+    price: toNum(p.Price),
+    mins: toNum(p.ExpMins),
+    xpts: toNum(p["1"]),
+    gw2: toNum(p["2GW"]),
+    gw5: toNum(p["5GW"]),
+    gw6: toNum(p["6GW"]),
+    xg: toNum(p.xG),
+    xa: toNum(p.xA),
+    def: defStat,
+  };
+}
+
+function renderFpl() {
+  const body = document.getElementById("fpl-body");
+  const query = document.getElementById("fpl-search").value.trim().toLowerCase();
+
+  let rows = state.fpl.map(fplRow);
+  if (query) {
+    rows = rows.filter((r) =>
+      r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
+    );
+  }
+  rows.sort((a, b) => (toNum(a[state.fplSortKey]) - toNum(b[state.fplSortKey])) * state.fplSortDir);
+  rows = rows.slice(0, 100);
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="10"><div class="empty-state">No matching players.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map((r) => `
+    <tr>
+      <td>
+        <div class="player-name">${escapeHtml(r.name)}</div>
+        <div class="player-sub">${escapeHtml(r.club)}${r.pos ? " &middot; " + escapeHtml(r.pos) : ""}</div>
+      </td>
+      <td class="num">${r.price.toFixed(1)}</td>
+      <td class="num">${r.mins}</td>
+      <td class="num">${r.xpts.toFixed(2)}</td>
+      <td class="num">${r.gw2.toFixed(2)}</td>
+      <td class="num">${r.gw5.toFixed(2)}</td>
+      <td class="num">${r.gw6.toFixed(2)}</td>
+      <td class="num">${r.xg.toFixed(2)}</td>
+      <td class="num">${r.xa.toFixed(2)}</td>
+      <td class="num">${r.def === null ? "&ndash;" : r.def.toFixed(2)}</td>
+    </tr>
+  `).join("");
+}
+
 function renderAll() {
   renderFixtures();
   renderResults();
+  renderFpl();
   renderLeaderboard();
 }
 
 async function loadData() {
-  if (!CONFIG.leaderboardCsvUrl || !CONFIG.matchesTabCsvUrl) {
+  if (!CONFIG.leaderboardCsvUrl || !CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
+    document.getElementById("fpl-body").innerHTML = "";
     document.getElementById("leaderboard-body").innerHTML = "";
     setStatus("Not configured");
     return;
@@ -669,12 +797,14 @@ async function loadData() {
   btn.dataset.loading = "true";
   setStatus("Loading&hellip;");
   try {
-    const [players, fixtures] = await Promise.all([
+    const [players, fixtures, fpl] = await Promise.all([
       parseCsv(CONFIG.leaderboardCsvUrl),
       parseCsv(CONFIG.matchesTabCsvUrl),
+      parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1),
     ]);
     state.players = players;
     state.fixtures = fixtures;
+    state.fpl = fpl;
     renderAll();
     setStatus("Updated " + new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
   } catch (err) {
@@ -725,22 +855,29 @@ document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((
   });
 });
 
+function wireSortableTable(tableId, sortKeyProp, sortDirProp, renderFn) {
+  const table = document.getElementById(tableId);
+  const headers = table.querySelectorAll("th.sortable");
+  headers.forEach((th) => {
+    th.addEventListener("click", () => {
+      if (state[sortKeyProp] === th.dataset.key) {
+        state[sortDirProp] *= -1;
+      } else {
+        state[sortKeyProp] = th.dataset.key;
+        state[sortDirProp] = -1;
+      }
+      headers.forEach((t) => t.classList.remove("active"));
+      th.classList.add("active");
+      renderFn();
+    });
+  });
+}
+
 document.getElementById("refresh-btn").addEventListener("click", loadData);
 document.getElementById("player-search").addEventListener("input", renderLeaderboard);
-document.querySelectorAll("th.sortable").forEach((th) => {
-  th.addEventListener("click", () => {
-    const key = th.dataset.key;
-    if (state.sortKey === key) {
-      state.sortDir *= -1;
-    } else {
-      state.sortKey = key;
-      state.sortDir = -1;
-    }
-    document.querySelectorAll("th.sortable").forEach((t) => t.classList.remove("active"));
-    th.classList.add("active");
-    renderLeaderboard();
-  });
-});
+document.getElementById("fpl-search").addEventListener("input", renderFpl);
+wireSortableTable("leaderboard-table", "sortKey", "sortDir", renderLeaderboard);
+wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 
 loadData();
 </script>
