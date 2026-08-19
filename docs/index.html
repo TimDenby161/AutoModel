@@ -159,6 +159,23 @@
     font-variant-numeric: tabular-nums;
     font-size: 13px; font-weight: 700;
   }
+  .match-probs { margin-top: 8px; }
+  .prob-bar {
+    display: flex; gap: 2px; height: 6px;
+    border-radius: 3px; overflow: hidden;
+  }
+  .prob-bar span { display: block; height: 100%; border-radius: 2px; }
+  .prob-home { background: var(--series-blue); }
+  .prob-draw { background: var(--text-muted); }
+  .prob-away { background: var(--series-orange); }
+  .prob-labels {
+    display: flex; justify-content: space-between;
+    margin-top: 4px; font-size: 11px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .prob-labels .prob-home { background: none; color: var(--series-blue); }
+  .prob-labels .prob-draw { background: none; color: var(--text-muted); }
+  .prob-labels .prob-away { background: none; color: var(--series-orange); }
   .result-pill {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
@@ -339,6 +356,40 @@ function matchScoreCenter(m) {
   `;
 }
 
+// HW_1/D_1/AW_1: the Matches tab has two HW/D/AW column sets (columns
+// AL-AN are 0/1 actual-result flags, AO-AQ are the model's win/draw/loss
+// probabilities) - PapaParse dedupes the repeated headers by suffixing
+// the second set with "_1". Only render once there's a real projection;
+// the model rows without one carry a placeholder 0/1/0 (guaranteed draw).
+function matchProbsRow(m) {
+  const projH = parseFloat(m.ProjH);
+  const projA = parseFloat(m.ProjA);
+  if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
+
+  const hw = parseFloat(m.HW_1);
+  const draw = parseFloat(m.D_1);
+  const aw = parseFloat(m.AW_1);
+  if (![hw, draw, aw].every(Number.isFinite)) return "";
+
+  const pctHw = Math.round(hw * 100);
+  const pctDraw = Math.round(draw * 100);
+  const pctAw = Math.round(aw * 100);
+  return `
+    <div class="match-probs">
+      <div class="prob-bar">
+        <span class="prob-home" style="width:${pctHw}%"></span>
+        <span class="prob-draw" style="width:${pctDraw}%"></span>
+        <span class="prob-away" style="width:${pctAw}%"></span>
+      </div>
+      <div class="prob-labels">
+        <span class="prob-home">${pctHw}%</span>
+        <span class="prob-draw">${pctDraw}%</span>
+        <span class="prob-away">${pctAw}%</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
@@ -362,6 +413,7 @@ function renderFixtures() {
         ${matchScoreCenter(m)}
         <div class="match-team away">${escapeHtml(m.Away)}</div>
       </div>
+      ${matchProbsRow(m)}
     </div>
   `).join("");
 }
