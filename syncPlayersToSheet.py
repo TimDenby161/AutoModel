@@ -75,6 +75,7 @@ import json
 import sys
 import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -344,11 +345,21 @@ def parse_args() -> argparse.Namespace:
         "--snapshot-matches",
         action="store_true",
         help=(
-            "Copy the Matches tab's current computed values into a new "
-            "MatchesSnapshot tab (formulas flattened to plain values, so "
-            "publish-to-web can export it instantly instead of recalculating "
-            "first). Opt-in and off by default; only ever reads Matches."
+            "Fetch Matches' own published CSV and write a ~17-column "
+            "projection (just what the dashboard reads) into a new "
+            "MatchesSnapshot tab, so publish-to-web can export it instantly "
+            "instead of recalculating Matches' formulas first. Opt-in and "
+            "off by default; only ever reads Matches, via its public CSV "
+            "link, never the Sheets API."
         ),
+    )
+    parser.add_argument(
+        "--matches-csv-url",
+        default=(
+            "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs"
+            "/pub?gid=1444085754&single=true&output=csv"
+        ),
+        help="Published CSV URL for the Matches tab (same one docs/index.html uses)",
     )
     parser.add_argument("--matches-snapshot-worksheet", default="MatchesSnapshot")
     parser.add_argument(
@@ -482,33 +493,24 @@ def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
         return spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols)
 
 
-def sync_static_snapshot(
+def write_static_rows(
     spreadsheet,
-    source_worksheet_name: str,
     destination_worksheet_name: str,
+    rows: list[list[Any]],
     sheet_batch_size: int,
 ) -> None:
-    """Copy `source_worksheet_name`'s current computed values - any formula
-    flattened to its result, via the same UNFORMATTED_VALUE read used
-    elsewhere - wholesale into `destination_worksheet_name`, growing/
-    shrinking it to fit and overwriting whatever was there. Only ever reads
-    from the source; never touches it. Google's publish-to-web CSV export
-    has to fully recalculate a formula-heavy sheet before it can serve a
-    copy, which can stall for minutes on a large tab - a plain-value
-    destination tab has nothing to recalculate, so its export is instant.
-    """
-    source = spreadsheet.worksheet(source_worksheet_name)
-    values = read_existing_values(
-        source, f"Read {source_worksheet_name} for {destination_worksheet_name} snapshot"
-    )
-    if not values:
-        safe_print(f"{source_worksheet_name} is empty; skipping {destination_worksheet_name} snapshot.")
+    """Overwrite `destination_worksheet_name` with `rows` (header row
+    included), growing/shrinking it to fit. Writes with value_input_option
+    RAW so nothing is reinterpreted as a formula or auto-parsed as a date -
+    every cell ends up exactly the text/number it was given."""
+    if not rows:
+        safe_print(f"Nothing to write; skipping {destination_worksheet_name} snapshot.")
         return
 
-    num_rows = len(values)
-    num_cols = max(len(row) for row in values)
+    num_rows = len(rows)
+    num_cols = max(len(row) for row in rows)
     last_col = column_letters(num_cols)
-    padded = [row + [""] * (num_cols - len(row)) for row in values]
+    padded = [row + [""] * (num_cols - len(row)) for row in rows]
 
     destination = get_or_create_worksheet(spreadsheet, destination_worksheet_name, num_cols)
     if destination.row_count < num_rows:
@@ -537,6 +539,94 @@ def sync_static_snapshot(
             description=f"Write {destination_worksheet_name} rows {start + 1}-{end_row}",
         )
         safe_print(f"{destination_worksheet_name}: wrote rows {start + 1:,}-{end_row:,} of {num_rows:,}")
+
+
+def sync_static_snapshot(
+    spreadsheet,
+    source_worksheet_name: str,
+    destination_worksheet_name: str,
+    sheet_batch_size: int,
+) -> None:
+    """Copy `source_worksheet_name`'s current computed values - any formula
+    flattened to its result, via the same UNFORMATTED_VALUE read used
+    elsewhere - wholesale into `destination_worksheet_name`. Only ever reads
+    from the source; never touches it. Fine for a small, dateless tab like
+    Data; for Matches, use sync_matches_snapshot instead (see there for why).
+    """
+    source = spreadsheet.worksheet(source_worksheet_name)
+    values = read_existing_values(
+        source, f"Read {source_worksheet_name} for {destination_worksheet_name} snapshot"
+    )
+    write_static_rows(spreadsheet, destination_worksheet_name, values, sheet_batch_size)
+
+
+# Matches columns actually read by the dashboard (docs/index.html), by
+# 0-based index in the Matches tab's own published CSV. Far fewer than all
+# 43 columns, both because most aren't used and because Matches' 17,000+
+# rows leave little headroom under the workbook's 10M-cell cap for a full
+# duplicate. HW_1/D_1/AW_1 are the *second* HW/D/AW columns (indices 40-42)
+# - the sheet has two sets, and only the second (the model's win/draw/loss
+# probabilities) is used; giving them unique names here avoids the
+# dashboard needing PapaParse's automatic "_1" dedup renaming at all.
+MATCHES_SNAPSHOT_COLUMNS = {
+    "Date": 1, "Started": 2, "Finished": 3, "Cancelled": 4,
+    "ID": 6, "League": 7, "Home": 10, "Away": 13,
+    "HomeS": 15, "AwayS": 16, "ProjH": 19, "ProjA": 20,
+    "HomeScr": 21, "AwayScr": 24, "HW_1": 40, "D_1": 41, "AW_1": 42,
+}
+
+
+def fetch_csv_rows(url: str, retries: int = 4, timeout: float = 60.0) -> list[list[str]]:
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                text = response.read().decode("utf-8-sig")
+            return list(csv.reader(text.splitlines()))
+        except Exception as exc:  # noqa: BLE001 - genuinely want to retry on anything
+            last_error = exc
+            if attempt < retries:
+                wait = min(10 * attempt, 60)
+                safe_print(f"Fetching {url} failed ({exc}); retrying in {wait}s...")
+                time.sleep(wait)
+    raise RuntimeError(f"Failed to fetch {url} after {retries} attempts: {last_error}")
+
+
+def sync_matches_snapshot(
+    spreadsheet,
+    matches_csv_url: str,
+    destination_worksheet_name: str,
+    sheet_batch_size: int,
+) -> None:
+    """Like sync_static_snapshot, but for Matches specifically: fetches
+    Matches' own published CSV (the same URL the dashboard already reads
+    and correctly parses) instead of reading via the Sheets API, and
+    projects down to MATCHES_SNAPSHOT_COLUMNS.
+
+    Two reasons this can't just be sync_static_snapshot:
+    1. Cell budget - Matches is 17,000+ rows x 43 columns; this workbook is
+       already near Google's 10M-cell-per-workbook cap, so a full 1:1 copy
+       doesn't fit, but a ~17-column projection does.
+    2. Dates - the Sheets API's UNFORMATTED_VALUE returns a raw date serial
+       number (e.g. 46619.02083), not the ISO string ("2026-08-19T00:30:00.
+       000Z") the dashboard's `new Date(...)` calls expect - that ISO
+       formatting is something Google's CSV *export* does specifically,
+       not something the API read exposes. Fetching the same CSV export
+       Google already renders correctly sidesteps reproducing that
+       formatting ourselves.
+    """
+    rows = fetch_csv_rows(matches_csv_url)
+    if len(rows) < 2:
+        safe_print("Matches CSV came back empty; skipping snapshot.")
+        return
+
+    headers = list(MATCHES_SNAPSHOT_COLUMNS.keys())
+    indices = list(MATCHES_SNAPSHOT_COLUMNS.values())
+    projected = [headers] + [
+        [row[i] if i < len(row) else "" for i in indices] for row in rows[1:]
+    ]
+    write_static_rows(spreadsheet, destination_worksheet_name, projected, sheet_batch_size)
 
 
 def sync_lookup_tab(
@@ -1643,13 +1733,19 @@ def main() -> int:
             sync_club_tab(spreadsheet, clubdata_ids)
 
     if args.snapshot_matches:
-        sync_static_snapshot(
-            spreadsheet, MATCHES_WORKSHEET, args.matches_snapshot_worksheet, args.sheet_batch_size
-        )
+        try:
+            sync_matches_snapshot(
+                spreadsheet, args.matches_csv_url, args.matches_snapshot_worksheet, args.sheet_batch_size
+            )
+        except Exception as exc:  # noqa: BLE001 - report and keep going, e.g. into --snapshot-data below
+            safe_print(f"MatchesSnapshot failed: {exc}")
     if args.snapshot_data:
-        sync_static_snapshot(
-            spreadsheet, args.data_worksheet, args.data_snapshot_worksheet, args.sheet_batch_size
-        )
+        try:
+            sync_static_snapshot(
+                spreadsheet, args.data_worksheet, args.data_snapshot_worksheet, args.sheet_batch_size
+            )
+        except Exception as exc:  # noqa: BLE001
+            safe_print(f"DataSnapshot failed: {exc}")
 
     return (
         0
