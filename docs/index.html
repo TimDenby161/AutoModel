@@ -262,6 +262,14 @@
       <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
       <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
       <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">LaLiga</button>
+      <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
+      <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
+      <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
+      <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi Pro League</button>
+      <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
+      <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
+      <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
+      <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
       <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
     </div>
     <div id="fixtures-list" class="card-list"></div>
@@ -274,6 +282,14 @@
       <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
       <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
       <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">LaLiga</button>
+      <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
+      <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
+      <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
+      <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi Pro League</button>
+      <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
+      <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
+      <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
+      <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
       <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
     </div>
     <div id="results-list" class="card-list"></div>
@@ -330,7 +346,15 @@ const LEAGUE_FILTERS = {
   l2: ["109"],
   bl: ["54"],
   ll: ["87"],
-  eng: ["47", "48", "108", "109", "117", "8944"],
+  champ: ["48"],
+  seriea: ["55"],
+  tur: ["71"],
+  sau: ["536"],
+  fr: ["53"],
+  ucl: ["42"],
+  el: ["73"],
+  ecl: ["10216"],
+  eng: ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"],
 };
 
 function setStatus(text) {
