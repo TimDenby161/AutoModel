@@ -214,7 +214,7 @@
   .filter-more[aria-expanded="true"] { background: var(--chip-bg); }
 
   .search-row { margin-bottom: 10px; }
-  #player-search {
+  .search-row input {
     width: 100%; padding: 10px 12px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--surface-1);
     color: var(--text-primary); font-size: 14px; font-family: inherit;
@@ -257,7 +257,6 @@
     <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
     <button role="tab" data-tab="results" aria-selected="false">Results</button>
     <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
-    <button role="tab" data-tab="leaderboard" aria-selected="false">Leaders</button>
   </nav>
 </header>
 
@@ -337,42 +336,16 @@
     </div>
   </section>
 
-  <section class="panel" data-tab="leaderboard">
-    <div class="search-row">
-      <input id="player-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
-    </div>
-    <div style="overflow-x:auto;">
-      <table class="leaderboard" id="leaderboard-table">
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th class="num sortable" data-key="rating">Rtg</th>
-            <th class="num sortable" data-key="goals">G</th>
-            <th class="num sortable" data-key="assists">A</th>
-            <th class="num sortable" data-key="ability">AB</th>
-            <th class="num sortable" data-key="minutes">Mins</th>
-            <th class="num sortable" data-key="xg">xG</th>
-            <th class="num sortable" data-key="xa">xA</th>
-          </tr>
-        </thead>
-        <tbody id="leaderboard-body"></tbody>
-      </table>
-    </div>
-  </section>
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
-// on the Data, Matches, and FPL tabs (CSV format, specific sheet, not
-// "Entire Document"). Each looks like:
+// on the Matches and FPL tabs (CSV format, specific sheet, not "Entire
+// Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
-  // "Players" tab directly (the Data tab - a QUERY(Players!...) formula -
-  // was deleted). Full 700+ column export, but playerRow() below only
-  // reads the ~12 fields the leaderboard needs.
-  leaderboardCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=777765661&single=true&output=csv",
   // Fixtures and Results are both driven from this one "Matches" tab -
   // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
   // and the club-score rating (HomeScr/AwayScr) all in one place.
@@ -383,7 +356,7 @@ const CONFIG = {
 // -------------------------------------------------------------------
 
 const state = {
-  players: [], fixtures: [], fpl: [], sortKey: "rating", sortDir: -1,
+  fixtures: [], fpl: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all",
 };
@@ -413,9 +386,8 @@ function setStatus(text) {
 function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
     This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
-    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code>,
-    <code>CONFIG.leaderboardCsvUrl</code>, and <code>CONFIG.fplCsvUrl</code>
-    with the links from Google Sheets'
+    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code> and
+    <code>CONFIG.fplCsvUrl</code> with the links from Google Sheets'
     <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
     at a time), then commit.
   </div>`;
@@ -669,63 +641,6 @@ function renderResults() {
   `).join("");
 }
 
-// Reads straight from the Players tab (the Data tab it used to come from
-// - a QUERY(Players!...) formula - was deleted). Players' own headers are
-// terse and some repeat (a general/overview stat then the current-season
-// one), so parseCsvWithHeaderRow's dedup renames the second occurrence
-// with a "_1" suffix - Mins/xG/NPxG/xA all need that suffixed name, not
-// the plain one, to hit the current-season column instead of the earlier
-// overview column sharing the same header text.
-function playerRow(p) {
-  return {
-    name: p.Name || "",
-    club: p.Club || "",
-    position: p.POS || "",
-    age: toNum(p.Age),
-    rating: toNum(p.RAT),
-    goals: toNum(p.G),
-    assists: toNum(p.A),
-    ability: toNum(p.AB),
-    minutes: toNum(p.Mins_1),
-    xg: toNum(p.xG_1),
-    xa: toNum(p.xA_1),
-  };
-}
-
-function renderLeaderboard() {
-  const body = document.getElementById("leaderboard-body");
-  const query = document.getElementById("player-search").value.trim().toLowerCase();
-
-  let rows = state.players.map(playerRow);
-  if (query) {
-    rows = rows.filter((r) =>
-      r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
-    );
-  }
-  rows.sort((a, b) => (a[state.sortKey] - b[state.sortKey]) * state.sortDir);
-  rows = rows.slice(0, 100);
-
-  if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="8"><div class="empty-state">No matching players.</div></td></tr>`;
-    return;
-  }
-  body.innerHTML = rows.map((r) => `
-    <tr>
-      <td>
-        <div class="player-name">${escapeHtml(r.name)}</div>
-        <div class="player-sub">${escapeHtml(r.club)}${r.position ? " &middot; " + escapeHtml(r.position) : ""}${r.age ? " &middot; " + r.age : ""}</div>
-      </td>
-      <td class="num">${r.rating ? r.rating.toFixed(2) : "&ndash;"}</td>
-      <td class="num">${r.goals}</td>
-      <td class="num">${r.assists}</td>
-      <td class="num">${r.ability}</td>
-      <td class="num">${r.minutes}</td>
-      <td class="num">${r.xg.toFixed(2)}</td>
-      <td class="num">${r.xa.toFixed(2)}</td>
-    </tr>
-  `).join("");
-}
-
 // Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
 // (expected defensive duels/actions), midfielders and strikers get xDM.
 function fplRow(p) {
@@ -786,8 +701,8 @@ function renderFpl() {
 // Google's publish-to-web CSV export is occasionally slow or outright
 // hangs for minutes. Each tab's data is fetched and rendered independently
 // (not one big Promise.all) so a stuck FPL fetch, say, can't leave
-// Fixtures/Results/Leaders stuck on "Loading..." forever too - and a hard
-// timeout means a hung request eventually surfaces as an error instead of
+// Fixtures/Results stuck on "Loading..." forever too - and a hard timeout
+// means a hung request eventually surfaces as an error instead of
 // spinning indefinitely.
 const FETCH_TIMEOUT_MS = 30000;
 
@@ -827,11 +742,10 @@ function showLoadErrorRow(tbody, colspan, label) {
 }
 
 async function loadData() {
-  if (!CONFIG.leaderboardCsvUrl || !CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl) {
+  if (!CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("fpl-body").innerHTML = "";
-    document.getElementById("leaderboard-body").innerHTML = "";
     setStatus("Not configured");
     return;
   }
@@ -850,16 +764,6 @@ async function loadData() {
         console.error(err);
         showLoadErrorCard(document.getElementById("fixtures-list"), "fixtures");
         showLoadErrorCard(document.getElementById("results-list"), "results");
-        throw err;
-      }),
-    fetchWithRetry(() => parseCsvWithHeaderRow(CONFIG.leaderboardCsvUrl, 1), "Leaderboard")
-      .then((players) => {
-        state.players = players;
-        renderLeaderboard();
-      })
-      .catch((err) => {
-        console.error(err);
-        showLoadErrorRow(document.getElementById("leaderboard-body"), 8, "the leaderboard");
         throw err;
       }),
     fetchWithRetry(() => parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1), "FPL")
@@ -943,9 +847,7 @@ function wireSortableTable(tableId, sortKeyProp, sortDirProp, renderFn) {
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadData);
-document.getElementById("player-search").addEventListener("input", renderLeaderboard);
 document.getElementById("fpl-search").addEventListener("input", renderFpl);
-wireSortableTable("leaderboard-table", "sortKey", "sortDir", renderLeaderboard);
 wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 
 loadData();
