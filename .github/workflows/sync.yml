@@ -1,6 +1,11 @@
 name: Sync FotMob Data
 
 on:
+  schedule:
+    # 03:00 UTC nightly. GitHub cron doesn't shift for daylight saving, so
+    # this is 3am GMT / 4am BST - adjust the minute/hour below if you want
+    # a different local time.
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       sync_players:
@@ -50,11 +55,15 @@ jobs:
         id: flags
         run: |
           FLAGS=""
-          [ "${{ inputs.sync_players }}" != "true" ] && FLAGS="$FLAGS --skip-players"
-          [ "${{ inputs.sync_managers }}" != "true" ] && FLAGS="$FLAGS --skip-managers"
-          [ "${{ inputs.sync_competitions }}" != "true" ] && FLAGS="$FLAGS --skip-competitions"
-          [ "${{ inputs.sync_matches }}" != "true" ] && FLAGS="$FLAGS --skip-matches"
-          [ "${{ inputs.sync_clubs }}" != "true" ] && FLAGS="$FLAGS --skip-clubs"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Scheduled run - syncing everything."
+          else
+            [ "${{ inputs.sync_players }}" != "true" ] && FLAGS="$FLAGS --skip-players"
+            [ "${{ inputs.sync_managers }}" != "true" ] && FLAGS="$FLAGS --skip-managers"
+            [ "${{ inputs.sync_competitions }}" != "true" ] && FLAGS="$FLAGS --skip-competitions"
+            [ "${{ inputs.sync_matches }}" != "true" ] && FLAGS="$FLAGS --skip-matches"
+            [ "${{ inputs.sync_clubs }}" != "true" ] && FLAGS="$FLAGS --skip-clubs"
+          fi
           echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
 
       - name: Run sync
