@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Export FotMob manager profiles, career records and trophies to CSV.
+Export AutoModel manager profiles, career records and trophies to CSV.
 
 Setup:
-    1. Create manager_ids.txt beside this script, one FotMob manager ID per line.
-    2. Run: python fotmob_manager_export.py
+    1. Create manager_ids.txt beside this script, one manager ID per line.
+    2. Run: python getManagers.py
 
 Outputs:
-    fotmob_managers.csv
-    fotmob_manager_errors.csv
+    automodel_managers.csv
+    automodel_manager_errors.csv
 
 The export is resumable. Re-running it skips manager IDs already present in the
 output and retries only missing/failed IDs.
@@ -101,7 +101,7 @@ LAST_REQUEST_AT = 0.0
 def parse_args() -> argparse.Namespace:
     folder = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Export FotMob manager data to a resumable CSV."
+        description="Export AutoModel manager data to a resumable CSV."
     )
     parser.add_argument(
         "input",
@@ -113,14 +113,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=folder / "fotmob_managers.csv",
-        help="Output CSV (default: fotmob_managers.csv beside the script)",
+        default=folder / "automodel_managers.csv",
+        help="Output CSV (default: automodel_managers.csv beside the script)",
     )
     parser.add_argument(
         "--errors",
         type=Path,
-        default=folder / "fotmob_manager_errors.csv",
-        help="Error CSV (default: fotmob_manager_errors.csv beside the script)",
+        default=folder / "automodel_manager_errors.csv",
+        help="Error CSV (default: automodel_manager_errors.csv beside the script)",
     )
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--request-delay", type=float, default=0.08)
@@ -154,7 +154,7 @@ def fetch_manager(
     url = f"{BASE_URL}?{urlencode({'id': manager_id})}"
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; FotMobManagerCSVExporter/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AutoModelManagerCSVExporter/1.0)",
         "Referer": "https://www.fotmob.com/",
     }
     last_error: Exception | None = None

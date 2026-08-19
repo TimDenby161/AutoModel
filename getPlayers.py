@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Export FotMob player profiles and combined season statistics to CSV.
+Export AutoModel player profiles and combined season statistics to CSV.
 
 Full-history import (run once):
     1. Put player IDs in player_ids.txt, one ID per line.
     2. Place this script in the same folder.
-    3. Run: python fotmob_export.py --mode full
+    3. Run: python getPlayers.py --mode full
 
 Fast ongoing refresh:
-    python fotmob_export.py --mode refresh
+    python getPlayers.py --mode refresh
 
 You can also supply a TXT or CSV input:
-    python fotmob_export.py my_player_ids.csv
+    python getPlayers.py my_player_ids.csv
 
 Outputs are written beside this script:
-    fotmob_players_full.csv       (full mode)
-    fotmob_players_current.csv    (refresh mode)
-    fotmob_errors.csv
+    automodel_players_full.csv       (full mode)
+    automodel_players_current.csv    (refresh mode)
+    automodel_errors.csv
 
 Both modes resume safely: IDs already present in that mode's output CSV are
 skipped on later runs.
@@ -183,7 +183,7 @@ def parse_args() -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
         description=(
-            "Export FotMob player profiles and combined statistics to a CSV "
+            "Export AutoModel player profiles and combined statistics to a CSV "
             "beside this script."
         )
     )
@@ -208,15 +208,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Output CSV (default: fotmob_players_full.csv in full mode or "
-            "fotmob_players_current.csv in refresh mode)"
+            "Output CSV (default: automodel_players_full.csv in full mode or "
+            "automodel_players_current.csv in refresh mode)"
         ),
     )
     parser.add_argument(
         "--errors",
         type=Path,
-        default=script_dir / "fotmob_errors.csv",
-        help="Error CSV (default: fotmob_errors.csv beside the script)",
+        default=script_dir / "automodel_errors.csv",
+        help="Error CSV (default: automodel_errors.csv beside the script)",
     )
     parser.add_argument(
         "--workers",
@@ -283,7 +283,7 @@ def fetch_json(
 ) -> dict[str, Any]:
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; FotMobCSVExporter/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AutoModelCSVExporter/1.0)",
         "Referer": "https://www.fotmob.com/",
     }
     last_error: Exception | None = None
@@ -1013,9 +1013,9 @@ def main() -> int:
     script_dir = Path(__file__).resolve().parent
     if args.output is None:
         filename = (
-            "fotmob_players_full.csv"
+            "automodel_players_full.csv"
             if args.mode == "full"
-            else "fotmob_players_current.csv"
+            else "automodel_players_current.csv"
         )
         args.output = script_dir / filename
     args.output = args.output.resolve()

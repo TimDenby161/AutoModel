@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Export useful FotMob club data to a CSV in the same folder as this script.
+Export useful AutoModel club data to a CSV in the same folder as this script.
 
 Setup:
-    1. Create club_ids.txt beside this script, one FotMob club ID per line.
-    2. Run: python fotmob_club_export.py
+    1. Create club_ids.txt beside this script, one club ID per line.
+    2. Run: python getClubs.py
 
 The script creates:
-    fotmob_clubs.csv
-    fotmob_club_errors.csv
+    automodel_clubs.csv
+    automodel_club_errors.csv
 
 Successful club IDs are skipped when the script is run again, so failed or
 interrupted imports can be retried safely without starting over.
@@ -102,7 +102,7 @@ LAST_REQUEST_AT = 0.0
 def parse_args() -> argparse.Namespace:
     folder = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Export FotMob club information to a resumable CSV."
+        description="Export AutoModel club information to a resumable CSV."
     )
     parser.add_argument(
         "input",
@@ -114,14 +114,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=folder / "fotmob_clubs.csv",
-        help="Output CSV (default: fotmob_clubs.csv beside the script)",
+        default=folder / "automodel_clubs.csv",
+        help="Output CSV (default: automodel_clubs.csv beside the script)",
     )
     parser.add_argument(
         "--errors",
         type=Path,
-        default=folder / "fotmob_club_errors.csv",
-        help="Error CSV (default: fotmob_club_errors.csv beside the script)",
+        default=folder / "automodel_club_errors.csv",
+        help="Error CSV (default: automodel_club_errors.csv beside the script)",
     )
     parser.add_argument(
         "--workers",
@@ -171,7 +171,7 @@ def fetch_club(
     url = f"{BASE_URL}?{query}"
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; FotMobClubCSVExporter/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AutoModelClubCSVExporter/1.0)",
         "Referer": "https://www.fotmob.com/",
     }
     last_error: Exception | None = None

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Export FotMob competition data to a CSV beside this script.
+Export AutoModel competition data to a CSV beside this script.
 
 Setup:
-    1. Create competition_ids.txt beside this script, one FotMob ID per line.
+    1. Create competition_ids.txt beside this script, one ID per line.
     2. Run: python getCompetitions.py
 
 Outputs:
-    fotmob_competitions.csv
-    fotmob_competition_errors.csv
+    automodel_competitions.csv
+    automodel_competition_errors.csv
 
 Re-running resumes automatically by skipping IDs already in the output.
 Use --overwrite to rebuild the file. Use --season "2025/2026" to request a
@@ -101,7 +101,7 @@ LAST_REQUEST_AT = 0.0
 def parse_args() -> argparse.Namespace:
     folder = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Export FotMob competition data to a resumable CSV."
+        description="Export AutoModel competition data to a resumable CSV."
     )
     parser.add_argument(
         "input",
@@ -113,12 +113,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=folder / "fotmob_competitions.csv",
+        default=folder / "automodel_competitions.csv",
     )
     parser.add_argument(
         "--errors",
         type=Path,
-        default=folder / "fotmob_competition_errors.csv",
+        default=folder / "automodel_competition_errors.csv",
     )
     parser.add_argument(
         "--season",
@@ -160,7 +160,7 @@ def fetch_competition(
     url = f"{BASE_URL}?{urlencode(params)}"
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; FotMobCompetitionCSVExporter/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; AutoModelCompetitionCSVExporter/1.0)",
         "Referer": "https://www.fotmob.com/",
     }
     last_error: Exception | None = None

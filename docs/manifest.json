@@ -1,6 +1,6 @@
 {
-  "name": "FotMob Data Dashboard",
-  "short_name": "FotMob",
+  "name": "AutoModel Data Dashboard",
+  "short_name": "AutoModel",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0d0d0d",

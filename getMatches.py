@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Export past and future FotMob matches for every club in club_ids.txt.
+Export past and future AutoModel matches for every club in club_ids.txt.
 
 Examples:
     python getMatches.py
@@ -84,10 +84,10 @@ HEADERS = [
 
 def args() -> argparse.Namespace:
     folder = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Export deduplicated FotMob matches by club.")
+    p = argparse.ArgumentParser(description="Export deduplicated AutoModel matches by club.")
     p.add_argument("input", nargs="?", type=Path, default=folder / "club_ids.txt")
-    p.add_argument("--output", type=Path, default=folder / "fotmob_matches.csv")
-    p.add_argument("--errors", type=Path, default=folder / "fotmob_match_errors.csv")
+    p.add_argument("--output", type=Path, default=folder / "automodel_matches.csv")
+    p.add_argument("--errors", type=Path, default=folder / "automodel_match_errors.csv")
     p.add_argument("--mode", choices=("full", "fixtures"), default="full")
     p.add_argument("--from-date", default="", help="Inclusive YYYY-MM-DD filter")
     p.add_argument("--to-date", default="", help="Inclusive YYYY-MM-DD filter")
@@ -130,7 +130,7 @@ def fetch(url: str, retries: int, delay: float) -> dict[str, Any]:
         try:
             req = Request(url, headers={
                 "Accept": "application/json", "Referer": "https://www.fotmob.com/",
-                "User-Agent": "Mozilla/5.0 (compatible; FotMobMatchCSVExporter/1.0)",
+                "User-Agent": "Mozilla/5.0 (compatible; AutoModelMatchCSVExporter/1.0)",
             })
             with urlopen(req, timeout=45) as response:
                 return json.loads(response.read().decode("utf-8"))

@@ -1,4 +1,4 @@
-name: Sync FotMob Data
+name: Sync AutoModel Data
 
 on:
   schedule:

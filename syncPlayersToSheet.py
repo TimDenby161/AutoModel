@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Keep the "PlayerData" Google Sheet (and fotmob_players_full.csv) up to date
+Keep the "PlayerData" Google Sheet (and automodel_players_full.csv) up to date
 from player_ids.txt, on a schedule.
 
 - Player IDs not yet in the sheet get the full multi-season pull (same as
@@ -151,13 +151,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--csv-output",
         type=Path,
-        default=folder / "fotmob_players_full.csv",
+        default=folder / "automodel_players_full.csv",
         help="CSV mirror of the sheet, rewritten each run",
     )
     parser.add_argument(
         "--errors",
         type=Path,
-        default=folder / "fotmob_sync_errors.csv",
+        default=folder / "automodel_sync_errors.csv",
         help="Error CSV, rewritten each run",
     )
     parser.add_argument(
@@ -191,13 +191,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--manager-csv-output",
         type=Path,
-        default=folder / "fotmob_managers.csv",
+        default=folder / "automodel_managers.csv",
         help="CSV mirror of the ManagerData sheet, rewritten each run",
     )
     parser.add_argument(
         "--manager-errors",
         type=Path,
-        default=folder / "fotmob_manager_sync_errors.csv",
+        default=folder / "automodel_manager_sync_errors.csv",
         help="Manager error CSV, rewritten each run",
     )
     parser.add_argument("--manager-workers", type=int, default=10)
@@ -218,13 +218,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--competition-csv-output",
         type=Path,
-        default=folder / "fotmob_competitions.csv",
+        default=folder / "automodel_competitions.csv",
         help="CSV mirror of the CompetitionData sheet, rewritten each run",
     )
     parser.add_argument(
         "--competition-errors",
         type=Path,
-        default=folder / "fotmob_competition_sync_errors.csv",
+        default=folder / "automodel_competition_sync_errors.csv",
         help="Competition error CSV, rewritten each run",
     )
     parser.add_argument(
@@ -255,13 +255,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--match-csv-output",
         type=Path,
-        default=folder / "fotmob_matches.csv",
+        default=folder / "automodel_matches.csv",
         help="CSV mirror of the MatchData sheet, rewritten each run",
     )
     parser.add_argument(
         "--match-errors",
         type=Path,
-        default=folder / "fotmob_match_sync_errors.csv",
+        default=folder / "automodel_match_sync_errors.csv",
         help="Match error CSV, rewritten each run",
     )
     parser.add_argument("--match-mode", choices=("full", "fixtures"), default="full")
@@ -310,13 +310,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--club-csv-output",
         type=Path,
-        default=folder / "fotmob_clubs.csv",
+        default=folder / "automodel_clubs.csv",
         help="CSV mirror of the ClubData sheet, rewritten each run",
     )
     parser.add_argument(
         "--club-errors",
         type=Path,
-        default=folder / "fotmob_club_sync_errors.csv",
+        default=folder / "automodel_club_sync_errors.csv",
         help="Club error CSV, rewritten each run",
     )
     parser.add_argument("--club-workers", type=int, default=10)
