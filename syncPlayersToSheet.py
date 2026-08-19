@@ -46,6 +46,14 @@ from player_ids.txt, on a schedule.
 - After MatchData is updated, the "Matches" tab's column A is rewritten
   to match its full ID list, the same way as Leagues/Club/Players. Pass
   --skip-matches-tab to leave that tab alone.
+- Pass --snapshot-matches and/or --snapshot-data to copy Matches' and/or
+  Data's current computed values (formulas flattened to their results)
+  into new "MatchesSnapshot"/"DataSnapshot" tabs - only ever reads the
+  source tab, never writes to it. Both are opt-in and off by default.
+  Google's publish-to-web CSV export has to fully recalculate a
+  formula-heavy tab before it can serve a copy, which can stall for
+  minutes on Matches' 17,000+ rows; a plain-value snapshot tab has
+  nothing to recalculate, so its export is instant.
 
 One-time setup:
     pip install gspread
@@ -332,6 +340,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Don't mirror IDs/formulas into the Club tab after syncing ClubData",
     )
+    parser.add_argument(
+        "--snapshot-matches",
+        action="store_true",
+        help=(
+            "Copy the Matches tab's current computed values into a new "
+            "MatchesSnapshot tab (formulas flattened to plain values, so "
+            "publish-to-web can export it instantly instead of recalculating "
+            "first). Opt-in and off by default; only ever reads Matches."
+        ),
+    )
+    parser.add_argument("--matches-snapshot-worksheet", default="MatchesSnapshot")
+    parser.add_argument(
+        "--snapshot-data",
+        action="store_true",
+        help="Like --snapshot-matches, but for the Data tab (the leaderboard's slim QUERY view).",
+    )
+    parser.add_argument("--data-worksheet", default="Data")
+    parser.add_argument("--data-snapshot-worksheet", default="DataSnapshot")
     return parser.parse_args()
 
 
@@ -454,6 +480,63 @@ def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
         return spreadsheet.worksheet(worksheet_name)
     except gspread.WorksheetNotFound:
         return spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols)
+
+
+def sync_static_snapshot(
+    spreadsheet,
+    source_worksheet_name: str,
+    destination_worksheet_name: str,
+    sheet_batch_size: int,
+) -> None:
+    """Copy `source_worksheet_name`'s current computed values - any formula
+    flattened to its result, via the same UNFORMATTED_VALUE read used
+    elsewhere - wholesale into `destination_worksheet_name`, growing/
+    shrinking it to fit and overwriting whatever was there. Only ever reads
+    from the source; never touches it. Google's publish-to-web CSV export
+    has to fully recalculate a formula-heavy sheet before it can serve a
+    copy, which can stall for minutes on a large tab - a plain-value
+    destination tab has nothing to recalculate, so its export is instant.
+    """
+    source = spreadsheet.worksheet(source_worksheet_name)
+    values = read_existing_values(
+        source, f"Read {source_worksheet_name} for {destination_worksheet_name} snapshot"
+    )
+    if not values:
+        safe_print(f"{source_worksheet_name} is empty; skipping {destination_worksheet_name} snapshot.")
+        return
+
+    num_rows = len(values)
+    num_cols = max(len(row) for row in values)
+    last_col = column_letters(num_cols)
+    padded = [row + [""] * (num_cols - len(row)) for row in values]
+
+    destination = get_or_create_worksheet(spreadsheet, destination_worksheet_name, num_cols)
+    if destination.row_count < num_rows:
+        sheet_call(
+            lambda: destination.add_rows(num_rows - destination.row_count),
+            description=f"Grow {destination_worksheet_name} rows",
+        )
+    if destination.col_count < num_cols:
+        sheet_call(
+            lambda: destination.add_cols(num_cols - destination.col_count),
+            description=f"Grow {destination_worksheet_name} columns",
+        )
+    if destination.row_count > num_rows:
+        sheet_call(
+            lambda: destination.batch_clear([f"A{num_rows + 1}:{last_col}{destination.row_count}"]),
+            description=f"Clear leftover {destination_worksheet_name} rows",
+        )
+
+    for start in range(0, num_rows, sheet_batch_size):
+        chunk = padded[start : start + sheet_batch_size]
+        end_row = start + len(chunk)
+        sheet_call(
+            lambda chunk=chunk, start=start, end_row=end_row: destination.update(
+                f"A{start + 1}:{last_col}{end_row}", chunk, value_input_option="RAW"
+            ),
+            description=f"Write {destination_worksheet_name} rows {start + 1}-{end_row}",
+        )
+        safe_print(f"{destination_worksheet_name}: wrote rows {start + 1:,}-{end_row:,} of {num_rows:,}")
 
 
 def sync_lookup_tab(
@@ -1558,6 +1641,15 @@ def main() -> int:
             club_worksheet = spreadsheet.worksheet(args.club_worksheet)
             clubdata_ids = id_column_values(club_worksheet, "Read final ClubData IDs")[1:]
             sync_club_tab(spreadsheet, clubdata_ids)
+
+    if args.snapshot_matches:
+        sync_static_snapshot(
+            spreadsheet, MATCHES_WORKSHEET, args.matches_snapshot_worksheet, args.sheet_batch_size
+        )
+    if args.snapshot_data:
+        sync_static_snapshot(
+            spreadsheet, args.data_worksheet, args.data_snapshot_worksheet, args.sheet_batch_size
+        )
 
     return (
         0
