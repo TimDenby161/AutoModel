@@ -325,8 +325,11 @@ const state = {
   fixtureFilter: "all", resultFilter: "all",
 };
 
-// League IDs - the Matches tab's "ID" column (immediately left of "League")
-// and MatchData's "Competition ID" column use the same numbering.
+// League IDs - the Matches tab's "ID" column and MatchData's "Parent
+// Competition ID" use the same numbering. MatchData's own "Competition ID"
+// isn't usable here: finished rounds get a distinct per-round sub-ID
+// (e.g. League Two's round 1 becomes 938220) while "Parent Competition ID"
+// stays fixed at 109 for every round.
 const LEAGUE_FILTERS = {
   all: null,
   pl: ["47"],
@@ -535,7 +538,7 @@ function renderResults() {
   const leagueIds = LEAGUE_FILTERS[state.resultFilter];
   const recent = state.matches
     .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m["Match UTC"])
-    .filter((m) => !leagueIds || leagueIds.includes(String(m["Competition ID"])))
+    .filter((m) => !leagueIds || leagueIds.includes(String(m["Parent Competition ID"])))
     .sort((a, b) => new Date(b["Match UTC"]) - new Date(a["Match UTC"]))
     .slice(0, CONFIG.resultsCount);
 
