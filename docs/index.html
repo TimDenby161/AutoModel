@@ -259,6 +259,22 @@
   }
   table.leaderboard td.num, table.leaderboard th.num { text-align: right; font-variant-numeric: tabular-nums; }
   table.leaderboard tbody tr:active { background: var(--chip-bg); }
+  /* All 10 columns fit a phone-width screen without scrolling - narrow
+     numeric columns, Club takes whatever width is left over. */
+  .standings-table { table-layout: fixed; font-size: 11px; }
+  .standings-table th, .standings-table td { padding: 6px 3px; }
+  .standings-table th:first-child, .standings-table td:first-child { width: 18px; padding-left: 0; }
+  .standings-table th:nth-child(3), .standings-table td:nth-child(3),
+  .standings-table th:nth-child(4), .standings-table td:nth-child(4),
+  .standings-table th:nth-child(5), .standings-table td:nth-child(5),
+  .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 18px; }
+  .standings-table th:nth-child(7), .standings-table td:nth-child(7),
+  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 22px; }
+  .standings-table th:nth-child(9), .standings-table td:nth-child(9) { width: 26px; }
+  .standings-table th:last-child, .standings-table td:last-child {
+    width: 28px; font-weight: 700; padding-right: 0;
+  }
+  .standings-table td:nth-child(2) { overflow-wrap: break-word; }
   .player-name { font-weight: 600; }
   .player-sub { color: var(--text-muted); font-size: 11px; }
   th.sortable { cursor: pointer; }
@@ -389,8 +405,8 @@
       <button type="button" class="filter-chip" data-view="current" aria-pressed="true">Current</button>
       <button type="button" class="filter-chip" data-view="projected" aria-pressed="false">Projected</button>
     </div>
-    <div style="overflow-x:auto;">
-      <table class="leaderboard">
+    <div>
+      <table class="leaderboard standings-table">
         <thead>
           <tr>
             <th>#</th>
@@ -912,7 +928,7 @@ function renderTable() {
     body.innerHTML = `<tr><td colspan="10"><div class="empty-state">No clubs found.</div></td></tr>`;
     return;
   }
-  const fmt = (n) => (projected ? n.toFixed(1) : String(Math.round(n)));
+  const fmt = (n) => String(Math.round(n));
   body.innerHTML = rows.map((r, i) => `
     <tr>
       <td>${i + 1}</td>
