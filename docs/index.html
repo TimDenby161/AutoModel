@@ -212,6 +212,7 @@
   }
   .filter-more { color: var(--series-blue); font-weight: 700; }
   .filter-more[aria-expanded="true"] { background: var(--chip-bg); }
+  #table-view-toggle { margin-bottom: 10px; }
 
   .search-row { margin-bottom: 10px; }
   .search-row input {
@@ -257,6 +258,7 @@
     <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
     <button role="tab" data-tab="results" aria-selected="false">Results</button>
     <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
+    <button role="tab" data-tab="table" aria-selected="false">Table</button>
   </nav>
 </header>
 
@@ -336,14 +338,59 @@
     </div>
   </section>
 
+  <section class="panel" data-tab="table">
+    <div class="filters-wrap" id="table-filters">
+      <div class="filter-row">
+        <button type="button" class="filter-chip" data-filter="pl" aria-pressed="true">Prem</button>
+        <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
+        <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
+        <button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>
+      </div>
+      <div class="filter-row filter-row-more" hidden>
+        <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
+        <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">La Liga</button>
+        <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
+        <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
+        <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
+        <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi</button>
+        <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
+        <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
+        <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
+      </div>
+    </div>
+    <div class="filter-row" id="table-view-toggle">
+      <button type="button" class="filter-chip" data-view="current" aria-pressed="true">Current</button>
+      <button type="button" class="filter-chip" data-view="projected" aria-pressed="false">Projected</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="leaderboard">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Club</th>
+            <th class="num">Pl</th>
+            <th class="num">W</th>
+            <th class="num">D</th>
+            <th class="num">L</th>
+            <th class="num">GF</th>
+            <th class="num">GA</th>
+            <th class="num">GD</th>
+            <th class="num">Pts</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
-// on the Matches and FPL tabs (CSV format, specific sheet, not "Entire
-// Document"). Each looks like:
+// on the Matches, FPL, and Club tabs (CSV format, specific sheet, not
+// "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
   // Fixtures and Results are both driven from this one "Matches" tab -
@@ -351,14 +398,15 @@ const CONFIG = {
   // and the club-score rating (HomeScr/AwayScr) all in one place.
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
   fplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=416026226&single=true&output=csv",
+  clubCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=801593454&single=true&output=csv",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
 const state = {
-  fixtures: [], fpl: [],
+  fixtures: [], fpl: [], club: [],
   fplSortKey: "xpts", fplSortDir: -1,
-  fixtureFilter: "all", resultFilter: "all",
+  fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
 };
 
 // League IDs - the Matches tab's "ID" column (immediately left of "League").
@@ -386,8 +434,9 @@ function setStatus(text) {
 function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
     This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
-    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code> and
-    <code>CONFIG.fplCsvUrl</code> with the links from Google Sheets'
+    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code>,
+    <code>CONFIG.fplCsvUrl</code>, and <code>CONFIG.clubCsvUrl</code>
+    with the links from Google Sheets'
     <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
     at a time), then commit.
   </div>`;
@@ -698,6 +747,61 @@ function renderFpl() {
   `).join("");
 }
 
+// Club tab: Pl/W/D/L/GF/GA/GD/Pts are the current table (games played so
+// far); TPL/TW/TD/TL/TGF/TGA/TGD/TPts are the projected final table
+// (current + projected remaining games combined). "GF" and "PPts" both
+// collide with earlier per-90-style columns earlier in the row, so
+// PapaParse's dedup renames the current table's own "GF" to "GF_1".
+function clubRow(c) {
+  return {
+    name: c.Name || "",
+    league: String(c.PrimaryLeague || ""),
+    current: {
+      pl: toNum(c.Pl), w: toNum(c.W), d: toNum(c.D), l: toNum(c.L),
+      gf: toNum(c.GF_1), ga: toNum(c.GA), gd: toNum(c.GD), pts: toNum(c.Pts),
+    },
+    projected: {
+      pl: toNum(c.TPL), w: toNum(c.TW), d: toNum(c.TD), l: toNum(c.TL),
+      gf: toNum(c.TGF), ga: toNum(c.TGA), gd: toNum(c.TGD), pts: toNum(c.TPts),
+    },
+  };
+}
+
+function renderTable() {
+  const body = document.getElementById("table-body");
+  const leagueIds = LEAGUE_FILTERS[state.tableFilter];
+  const projected = state.tableView === "projected";
+
+  let rows = state.club
+    .map(clubRow)
+    .filter((r) => !leagueIds || leagueIds.includes(r.league))
+    .map((r) => ({ name: r.name, stats: projected ? r.projected : r.current }));
+
+  rows.sort((a, b) =>
+    (b.stats.pts - a.stats.pts) || (b.stats.gd - a.stats.gd) || (b.stats.gf - a.stats.gf)
+  );
+
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="10"><div class="empty-state">No clubs found.</div></td></tr>`;
+    return;
+  }
+  const fmt = (n) => (projected ? n.toFixed(1) : String(Math.round(n)));
+  body.innerHTML = rows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td class="num">${fmt(r.stats.pl)}</td>
+      <td class="num">${fmt(r.stats.w)}</td>
+      <td class="num">${fmt(r.stats.d)}</td>
+      <td class="num">${fmt(r.stats.l)}</td>
+      <td class="num">${fmt(r.stats.gf)}</td>
+      <td class="num">${fmt(r.stats.ga)}</td>
+      <td class="num">${fmt(r.stats.gd)}</td>
+      <td class="num">${fmt(r.stats.pts)}</td>
+    </tr>
+  `).join("");
+}
+
 // Google's publish-to-web CSV export is occasionally slow or outright
 // hangs for minutes. Each tab's data is fetched and rendered independently
 // (not one big Promise.all) so a stuck FPL fetch, say, can't leave
@@ -742,10 +846,11 @@ function showLoadErrorRow(tbody, colspan, label) {
 }
 
 async function loadData() {
-  if (!CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl) {
+  if (!CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl || !CONFIG.clubCsvUrl) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("fpl-body").innerHTML = "";
+    document.getElementById("table-body").innerHTML = "";
     setStatus("Not configured");
     return;
   }
@@ -774,6 +879,16 @@ async function loadData() {
       .catch((err) => {
         console.error(err);
         showLoadErrorRow(document.getElementById("fpl-body"), 10, "FPL data");
+        throw err;
+      }),
+    fetchWithRetry(() => parseCsv(CONFIG.clubCsvUrl), "Club")
+      .then((club) => {
+        state.club = club;
+        renderTable();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorRow(document.getElementById("table-body"), 10, "the table");
         throw err;
       }),
   ];
@@ -809,6 +924,7 @@ function wireMoreToggle(wrap) {
 }
 wireMoreToggle(document.getElementById("fixture-filters"));
 wireMoreToggle(document.getElementById("result-filters"));
+wireMoreToggle(document.getElementById("table-filters"));
 
 document.querySelectorAll("#fixture-filters .filter-chip[data-filter]").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -825,6 +941,24 @@ document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((
     btn.setAttribute("aria-pressed", "true");
     state.resultFilter = btn.dataset.filter;
     renderResults();
+  });
+});
+
+document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.tableFilter = btn.dataset.filter;
+    renderTable();
+  });
+});
+
+document.querySelectorAll("#table-view-toggle .filter-chip[data-view]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#table-view-toggle .filter-chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.tableView = btn.dataset.view;
+    renderTable();
   });
 });
 
