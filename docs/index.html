@@ -814,28 +814,29 @@ function buildLineupsByClub(rows) {
     const club = (r.Club || "").trim();
     if (!club || !r.Name) return;
     if (!map[club]) map[club] = {};
-    map[club][r.Position] = {
+    if (!map[club][r.Position]) map[club][r.Position] = [];
+    map[club][r.Position].push({
       name: r.Name,
       mins: toNum(r.Mins),
       age: toNum(r.Age),
       ability: toNum(r.Ability),
-    };
+    });
   });
   return map;
 }
 
 function renderLineupList(lineup) {
   if (!lineup) return `<div class="empty-state">Lineup not available.</div>`;
-  const rows = LINEUP_POSITIONS.map((pos) => {
-    const entry = lineup[pos];
-    if (!entry) return "";
-    return `
+  const rows = LINEUP_POSITIONS.flatMap((pos) => {
+    const entries = lineup[pos];
+    if (!entries || !entries.length) return [];
+    return entries.map((entry) => `
       <div class="lineup-row">
         <span class="lineup-pos">${pos}</span>
         <span class="lineup-name">${escapeHtml(entry.name)}</span>
         <span class="lineup-meta">${entry.mins}&prime; &middot; ${entry.age}y &middot; ${entry.ability.toFixed(0)}</span>
       </div>
-    `;
+    `);
   }).join("");
   return rows || `<div class="empty-state">Lineup not available.</div>`;
 }
