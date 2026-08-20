@@ -136,12 +136,8 @@
   .lineup-pitch { display: flex; align-items: stretch; gap: 12px; }
   .pitch-team { flex: 1; min-width: 0; }
   .pitch-divider { width: 1px; background: var(--border); align-self: stretch; }
-  .pitch-line-label {
-    color: var(--text-muted); font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em;
-    margin: 10px 0 4px;
-  }
-  .pitch-line-label:first-child { margin-top: 0; }
+  .pitch-group { margin-top: 10px; }
+  .pitch-group:first-child { margin-top: 0; }
   .pitch-player { padding: 3px 0; }
   .pitch-player-top {
     display: flex; align-items: baseline; gap: 6px;
@@ -848,11 +844,6 @@ function buildLineupsByClub(rows) {
   return map;
 }
 
-// Attack-to-defense, so each team column reads ST (top) down to GK (bottom) -
-// both teams' attacking players end up in the same band near the top, like
-// two mirrored half-pitches meeting at the halfway line.
-const PITCH_STACK_LINES = [...PITCH_LINES].reverse();
-
 function renderPitchPlayer(pos, entry) {
   return `
     <div class="pitch-player">
@@ -867,14 +858,14 @@ function renderPitchPlayer(pos, entry) {
 }
 
 function renderPitchColumn(lineup) {
-  const body = PITCH_STACK_LINES.map((line) => {
+  const body = PITCH_LINES.map((line) => {
     const players = line.positions.flatMap((pos) => {
       const entries = lineup ? lineup[pos] : null;
       if (!entries || !entries.length) return [];
       return entries.map((entry) => renderPitchPlayer(pos, entry));
     });
     if (!players.length) return "";
-    return `<div class="pitch-line-label">${line.key.toUpperCase()}</div>${players.join("")}`;
+    return `<div class="pitch-group">${players.join("")}</div>`;
   }).join("");
   return body || `<div class="empty-state">Lineup not available.</div>`;
 }
