@@ -302,6 +302,43 @@
   th.sortable { cursor: pointer; }
   th.sortable.active { color: var(--series-blue); }
 
+  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+  .action-btn {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-primary); border-radius: 8px; padding: 8px 12px;
+    font-size: 13px; font-weight: 600; font-family: inherit; flex: 1;
+  }
+  .action-btn:active { opacity: 0.7; }
+  .action-btn:disabled { opacity: 0.5; }
+  .ai-fpl-status { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; min-height: 16px; }
+  .ai-gw-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .ai-gw-header {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-size: 13px; font-weight: 700; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ai-gw-section-label {
+    color: var(--text-muted); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px;
+  }
+  .ai-player { padding: 3px 0; }
+  .ai-player-top { display: flex; align-items: baseline; gap: 8px; }
+  .ai-player-pos {
+    color: var(--text-muted); font-size: 9px; font-weight: 700;
+    text-transform: uppercase; width: 26px; flex-shrink: 0;
+  }
+  .ai-player-name {
+    flex: 1; min-width: 0; font-weight: 600; font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-player-xpts {
+    font-weight: 700; font-size: 13px; color: var(--series-blue); flex-shrink: 0;
+  }
+  .ai-player-meta { margin-left: 34px; color: var(--text-muted); font-size: 10px; }
+
   .config-warning {
     background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
@@ -322,8 +359,9 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
     <button role="tab" data-tab="results" aria-selected="false">Results</button>
-    <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
     <button role="tab" data-tab="table" aria-selected="false">Table</button>
+    <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
+    <button role="tab" data-tab="ai-fpl" aria-selected="false">AI FPL</button>
   </nav>
 </header>
 
@@ -378,31 +416,6 @@
     <div id="results-list" class="card-list"></div>
   </section>
 
-  <section class="panel" data-tab="fpl">
-    <div class="search-row">
-      <input id="fpl-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
-    </div>
-    <div style="overflow-x:auto;">
-      <table class="leaderboard fpl-table-compact" id="fpl-table">
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th class="num sortable" data-key="price">Price</th>
-            <th class="num sortable" data-key="mins">Mins</th>
-            <th class="num sortable" data-key="xpts">xPts</th>
-            <th class="num sortable" data-key="gw2">2GW</th>
-            <th class="num sortable" data-key="gw5">5GW</th>
-            <th class="num sortable" data-key="gw6">6GW</th>
-            <th class="num sortable" data-key="xg">xG</th>
-            <th class="num sortable" data-key="xa">xA</th>
-            <th class="num sortable" data-key="def">Def</th>
-          </tr>
-        </thead>
-        <tbody id="fpl-body"></tbody>
-      </table>
-    </div>
-  </section>
-
   <section class="panel" data-tab="table">
     <div class="filters-wrap" id="table-filters">
       <div class="filter-row">
@@ -448,6 +461,40 @@
     </div>
   </section>
 
+  <section class="panel" data-tab="fpl">
+    <div class="search-row">
+      <input id="fpl-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="leaderboard fpl-table-compact" id="fpl-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th class="num sortable" data-key="price">Price</th>
+            <th class="num sortable" data-key="mins">Mins</th>
+            <th class="num sortable" data-key="xpts">xPts</th>
+            <th class="num sortable" data-key="gw2">2GW</th>
+            <th class="num sortable" data-key="gw5">5GW</th>
+            <th class="num sortable" data-key="gw6">6GW</th>
+            <th class="num sortable" data-key="xg">xG</th>
+            <th class="num sortable" data-key="xa">xA</th>
+            <th class="num sortable" data-key="def">Def</th>
+          </tr>
+        </thead>
+        <tbody id="fpl-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" data-tab="ai-fpl">
+    <div class="ai-fpl-actions">
+      <button type="button" id="ai-build-btn" class="action-btn">Build AI FPL Squad</button>
+      <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
+    </div>
+    <div id="ai-fpl-status" class="ai-fpl-status"></div>
+    <div id="ai-fpl-list" class="card-list"></div>
+  </section>
+
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -469,12 +516,19 @@ const CONFIG = {
   // by a custom EXPECTED_MINUTES() formula that takes 20-60+ seconds to
   // recalculate per club, far too slow for a click-to-expand UI.
   lineupsCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1415919920&single=true&output=csv",
+  // AIXI tab: repeating "GW{n} XI" blocks (own header row per block), not a
+  // single flat table - see parseAiFplBlocks.
+  aiFplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=932437441&single=true&output=csv",
+  // Apps Script Web App /exec URL, for the Build Squad / Update Transfers
+  // buttons on the AI FPL tab - set once that's deployed (see doGet's
+  // action= dispatch).
+  aiFplScriptUrl: "",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
 const state = {
-  fixtures: [], fpl: [], club: [], lineupsByClub: {},
+  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
 };
@@ -574,6 +628,65 @@ function parseCsvWithHeaderRow(url, headerRow) {
       error: reject,
     });
   });
+}
+
+function parseCsvRaw(url) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: false,
+      skipEmptyLines: true,
+      complete: (results) => resolve(results.data),
+      error: reject,
+    });
+  });
+}
+
+// The AIXI tab isn't one flat table - it's repeating blocks, each starting
+// with its own label row ("GW1 XI - 3-5-2 - 76.83 xPts") followed by its
+// own header row (Role, Pos, Player, Club, Price, xPts, Order), then the
+// XI and Bench rows for that gameweek. Walk the raw rows and regroup them.
+function parseAiFplBlocks(rows) {
+  const gwHeaderRe = /^GW(\d+)\s+XI/i;
+  const blocks = [];
+  let current = null;
+
+  rows.forEach((row) => {
+    const first = (row[0] || "").trim();
+    const match = first.match(gwHeaderRe);
+    if (match) {
+      if (current) blocks.push(current);
+      const formationMatch = first.match(/\d+-\d+(?:-\d+)*/);
+      const xptsMatch = first.match(/([\d.]+)\s*xPts/i);
+      current = {
+        gw: Number(match[1]),
+        label: first,
+        formation: formationMatch ? formationMatch[0] : "",
+        totalXpts: xptsMatch ? toNum(xptsMatch[1]) : 0,
+        xi: [],
+        bench: [],
+      };
+      return;
+    }
+    if (!current) return;
+    if (first === "Role") return; // this block's own header row
+    const [role, pos, player, club, price, xpts, order] = row;
+    if (!player) return;
+    const entry = {
+      pos: (pos || "").trim(),
+      player: (player || "").trim(),
+      club: (club || "").trim(),
+      price: toNum(price),
+      xpts: toNum(xpts),
+      order: toNum(order),
+    };
+    if ((role || "").trim().toLowerCase() === "bench") current.bench.push(entry);
+    else current.xi.push(entry);
+  });
+  if (current) blocks.push(current);
+
+  blocks.forEach((b) => b.bench.sort((a, c) => a.order - c.order));
+  return blocks;
 }
 
 function toNum(v) {
@@ -967,6 +1080,42 @@ function renderTable() {
   `).join("");
 }
 
+function renderAiPlayerRow(p) {
+  return `
+    <div class="ai-player">
+      <div class="ai-player-top">
+        <span class="ai-player-pos">${escapeHtml(p.pos)}</span>
+        <span class="ai-player-name">${escapeHtml(p.player)}</span>
+        <span class="ai-player-xpts">${p.xpts.toFixed(1)}</span>
+      </div>
+      <div class="ai-player-meta">${escapeHtml(p.club)} &middot; &pound;${p.price.toFixed(1)}</div>
+    </div>
+  `;
+}
+
+function renderAiFpl() {
+  const container = document.getElementById("ai-fpl-list");
+  const blocks = [...state.aiFpl].sort((a, b) => a.gw - b.gw);
+
+  if (!blocks.length) {
+    container.innerHTML = `<div class="empty-state">No AI FPL squad data yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = blocks.map((b) => `
+    <div class="ai-gw-card">
+      <div class="ai-gw-header">
+        <span>GW${b.gw}</span>
+        <span>${escapeHtml(b.formation)}</span>
+        <span>${b.totalXpts.toFixed(2)} xPts</span>
+      </div>
+      <div class="ai-gw-section-label">Starting XI</div>
+      ${b.xi.map(renderAiPlayerRow).join("")}
+      ${b.bench.length ? `<div class="ai-gw-section-label">Bench</div>${b.bench.map(renderAiPlayerRow).join("")}` : ""}
+    </div>
+  `).join("");
+}
+
 // Google's publish-to-web CSV export is occasionally slow or outright
 // hangs for minutes. Each tab's data is fetched and rendered independently
 // (not one big Promise.all) so a stuck FPL fetch, say, can't leave
@@ -1064,6 +1213,16 @@ async function loadData() {
         state.lineupsByClub = buildLineupsByClub(lineups);
       })
       .catch((err) => console.error(err)),
+    fetchWithRetry(() => parseCsvRaw(CONFIG.aiFplCsvUrl), "AI FPL")
+      .then((rows) => {
+        state.aiFpl = parseAiFplBlocks(rows);
+        renderAiFpl();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorCard(document.getElementById("ai-fpl-list"), "the AI FPL squad");
+        throw err;
+      }),
   ];
 
   const results = await Promise.allSettled(tasks);
@@ -1175,6 +1334,40 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
     card.dataset.homeName, card.dataset.awayName
   );
   panel.hidden = false;
+});
+
+// Both AI FPL actions run synchronously against a slow custom formula (the
+// same EXPECTED_MINUTES() bottleneck the lineups needed a cache to work
+// around), so this can take a couple of minutes - the button just waits.
+async function runAiFplAction(action, btn, label) {
+  const statusEl = document.getElementById("ai-fpl-status");
+  if (!CONFIG.aiFplScriptUrl) {
+    statusEl.textContent = "Apps Script URL not configured yet.";
+    return;
+  }
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  statusEl.textContent = `${label} is running - this can take a couple of minutes…`;
+  try {
+    const res = await fetch(`${CONFIG.aiFplScriptUrl}?action=${action}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    statusEl.textContent = `${label} finished - hit Refresh to see the update.`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `${label} failed: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+document.getElementById("ai-build-btn").addEventListener("click", (e) => {
+  runAiFplAction("build_squad", e.target, "Build Squad");
+});
+document.getElementById("ai-transfers-btn").addEventListener("click", (e) => {
+  runAiFplAction("update_transfers", e.target, "Update Transfers");
 });
 
 loadData();
