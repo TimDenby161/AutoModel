@@ -302,11 +302,11 @@
   th.sortable { cursor: pointer; }
   th.sortable.active { color: var(--series-blue); }
 
-  .ai-fpl-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 10px; }
   .action-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
-    color: var(--text-primary); border-radius: 8px; padding: 10px 12px;
-    font-size: 13px; font-weight: 600; font-family: inherit; width: 100%;
+    color: var(--text-primary); border-radius: 8px; padding: 8px 12px;
+    font-size: 13px; font-weight: 600; font-family: inherit; flex: 1;
   }
   .action-btn:active { opacity: 0.7; }
   .action-btn:disabled { opacity: 0.5; }
@@ -490,7 +490,6 @@
     <div class="ai-fpl-actions">
       <button type="button" id="ai-build-btn" class="action-btn">Build AI FPL Squad</button>
       <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
-      <button type="button" id="ai-sync-btn" class="action-btn">Sync Players Data</button>
     </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
     <div id="ai-fpl-list" class="card-list"></div>
@@ -1337,14 +1336,10 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
   panel.hidden = false;
 });
 
-// Build Squad / Update Transfers run synchronously against a slow custom
-// formula (the same EXPECTED_MINUTES() bottleneck the lineups needed a
-// cache to work around), so the button just waits for them to finish.
-// Sync Players Data is different - it only enqueues a GitHub Actions run
-// and returns immediately, so its doneMessage says "started", not
-// "finished" (see runningMessage/doneMessage overrides below).
-async function runAiFplAction(action, btn, label, opts) {
-  opts = opts || {};
+// Both AI FPL actions run synchronously against a slow custom formula (the
+// same EXPECTED_MINUTES() bottleneck the lineups needed a cache to work
+// around), so this can take a couple of minutes - the button just waits.
+async function runAiFplAction(action, btn, label) {
   const statusEl = document.getElementById("ai-fpl-status");
   if (!CONFIG.aiFplScriptUrl) {
     statusEl.textContent = "Apps Script URL not configured yet.";
@@ -1353,12 +1348,12 @@ async function runAiFplAction(action, btn, label, opts) {
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Running…";
-  statusEl.textContent = opts.runningMessage || `${label} is running - this can take a couple of minutes…`;
+  statusEl.textContent = `${label} is running - this can take a couple of minutes…`;
   try {
     const res = await fetch(`${CONFIG.aiFplScriptUrl}?action=${action}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    statusEl.textContent = opts.doneMessage || `${label} finished - hit Refresh to see the update.`;
+    statusEl.textContent = `${label} finished - hit Refresh to see the update.`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = `${label} failed: ${err.message}`;
@@ -1373,12 +1368,6 @@ document.getElementById("ai-build-btn").addEventListener("click", (e) => {
 });
 document.getElementById("ai-transfers-btn").addEventListener("click", (e) => {
   runAiFplAction("update_transfers", e.target, "Update Transfers");
-});
-document.getElementById("ai-sync-btn").addEventListener("click", (e) => {
-  runAiFplAction("sync_players", e.target, "Sync Players Data", {
-    runningMessage: "Starting the players sync on GitHub Actions…",
-    doneMessage: "Sync started on GitHub Actions - this runs in the background and can take a while, check back later.",
-  });
 });
 
 loadData();
