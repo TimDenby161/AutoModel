@@ -133,9 +133,10 @@
   .lineup-panel {
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
   }
-  .lineup-pitch { display: flex; align-items: stretch; gap: 12px; }
-  .pitch-team { flex: 1; min-width: 0; }
-  .pitch-divider { width: 1px; background: var(--border); align-self: stretch; }
+  .lineup-pitch { display: flex; flex-direction: column; gap: 14px; }
+  .pitch-team { min-width: 0; }
+  .pitch-team-name { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+  .pitch-divider { height: 1px; background: var(--border); }
   .pitch-group { margin-top: 10px; }
   .pitch-group:first-child { margin-top: 0; }
   .pitch-player {
@@ -656,7 +657,7 @@ function renderFixtures() {
     ? ""
     : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
   container.innerHTML = note + upcoming.map((m) => `
-    <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}">
+    <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
       <div class="match-comp">
         <span>${escapeHtml(m.League || "")}</span>
         <span>${escapeHtml(formatKickoff(m.Date))}</span>
@@ -867,7 +868,7 @@ function renderPitchColumn(lineup) {
   return body || `<div class="empty-state">Lineup not available.</div>`;
 }
 
-function renderLineupPanel(homeId, awayId) {
+function renderLineupPanel(homeId, awayId, homeName, awayName) {
   const codeById = clubCodeByClubId();
   const homeCode = codeById[String(homeId)];
   const awayCode = codeById[String(awayId)];
@@ -880,9 +881,15 @@ function renderLineupPanel(homeId, awayId) {
 
   return `
     <div class="lineup-pitch">
-      <div class="pitch-team">${renderPitchColumn(homeLineup)}</div>
+      <div class="pitch-team">
+        <div class="pitch-team-name">${escapeHtml(homeName || "")}</div>
+        ${renderPitchColumn(homeLineup)}
+      </div>
       <div class="pitch-divider"></div>
-      <div class="pitch-team">${renderPitchColumn(awayLineup)}</div>
+      <div class="pitch-team">
+        <div class="pitch-team-name">${escapeHtml(awayName || "")}</div>
+        ${renderPitchColumn(awayLineup)}
+      </div>
     </div>
   `;
 }
@@ -1125,7 +1132,10 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
     panel.hidden = true;
     return;
   }
-  panel.innerHTML = renderLineupPanel(card.dataset.homeId, card.dataset.awayId);
+  panel.innerHTML = renderLineupPanel(
+    card.dataset.homeId, card.dataset.awayId,
+    card.dataset.homeName, card.dataset.awayName
+  );
   panel.hidden = false;
 });
 
