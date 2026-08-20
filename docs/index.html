@@ -128,8 +128,26 @@
   .card-list { display: flex; flex-direction: column; gap: 8px; }
   .match-card {
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px 12px;
+    border-radius: 10px; padding: 10px 12px; cursor: pointer;
   }
+  .lineup-panel {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  }
+  .lineup-cols { display: flex; gap: 12px; }
+  .lineup-col { flex: 1; min-width: 0; }
+  .lineup-col-away { text-align: right; }
+  .lineup-row {
+    display: flex; align-items: baseline; gap: 6px; padding: 2px 0;
+    font-size: 12px;
+  }
+  .lineup-col-away .lineup-row { flex-direction: row-reverse; }
+  .lineup-pos {
+    color: var(--text-muted); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; width: 26px; flex-shrink: 0;
+  }
+  .lineup-col-away .lineup-pos { text-align: right; }
+  .lineup-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lineup-meta { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
@@ -399,15 +417,22 @@ const CONFIG = {
   matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
   fplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=416026226&single=true&output=csv",
   clubCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=801593454&single=true&output=csv",
+  // LineupsCache: pre-computed by a scheduled Apps Script trigger (see
+  // refreshAllLineups), not read live - the source XXXMins tabs are driven
+  // by a custom EXPECTED_MINUTES() formula that takes 20-60+ seconds to
+  // recalculate per club, far too slow for a click-to-expand UI.
+  lineupsCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1415919920&single=true&output=csv",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
 const state = {
-  fixtures: [], fpl: [], club: [],
+  fixtures: [], fpl: [], club: [], lineupsByClub: {},
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
 };
+
+const LINEUP_POSITIONS = ["GK","LB","CB","RB","DM","LWB","RWB","LM","CM","RM","LW","AM","RW","ST"];
 
 // League IDs - the Matches tab's "ID" column (immediately left of "League").
 const LEAGUE_FILTERS = {
@@ -613,7 +638,7 @@ function renderFixtures() {
     ? ""
     : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
   container.innerHTML = note + upcoming.map((m) => `
-    <div class="match-card">
+    <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}">
       <div class="match-comp">
         <span>${escapeHtml(m.League || "")}</span>
         <span>${escapeHtml(formatKickoff(m.Date))}</span>
@@ -630,6 +655,7 @@ function renderFixtures() {
         </div>
       </div>
       ${matchProbsRow(m)}
+      <div class="lineup-panel" hidden></div>
     </div>
   `).join("");
 }
@@ -767,6 +793,68 @@ function clubRow(c) {
   };
 }
 
+// Club ID -> short code (e.g. "8456" -> "MCI"), used to resolve a
+// fixture's Home/Away Club ID (Matches!ID_1/ID_2) to the code LineupsCache
+// keys its rows by.
+function clubCodeByClubId() {
+  const map = {};
+  state.club.forEach((c) => {
+    const id = String(c["Club ID"] || "").trim();
+    const code = String(c.Club || "").trim();
+    if (id && code) map[id] = code;
+  });
+  return map;
+}
+
+// Club short code -> { position: {name, mins, age, ability} }, from the
+// pre-computed LineupsCache tab (see CONFIG.lineupsCsvUrl).
+function buildLineupsByClub(rows) {
+  const map = {};
+  rows.forEach((r) => {
+    const club = (r.Club || "").trim();
+    if (!club || !r.Name) return;
+    if (!map[club]) map[club] = {};
+    map[club][r.Position] = {
+      name: r.Name,
+      mins: toNum(r.Mins),
+      age: toNum(r.Age),
+      ability: toNum(r.Ability),
+    };
+  });
+  return map;
+}
+
+function renderLineupList(lineup) {
+  if (!lineup) return `<div class="empty-state">Lineup not available.</div>`;
+  const rows = LINEUP_POSITIONS.map((pos) => {
+    const entry = lineup[pos];
+    if (!entry) return "";
+    return `
+      <div class="lineup-row">
+        <span class="lineup-pos">${pos}</span>
+        <span class="lineup-name">${escapeHtml(entry.name)}</span>
+        <span class="lineup-meta">${entry.mins}&prime; &middot; ${entry.age}y &middot; ${entry.ability.toFixed(0)}</span>
+      </div>
+    `;
+  }).join("");
+  return rows || `<div class="empty-state">Lineup not available.</div>`;
+}
+
+function renderLineupPanel(homeId, awayId) {
+  const codeById = clubCodeByClubId();
+  const homeCode = codeById[String(homeId)];
+  const awayCode = codeById[String(awayId)];
+  const homeLineup = homeCode ? state.lineupsByClub[homeCode] : null;
+  const awayLineup = awayCode ? state.lineupsByClub[awayCode] : null;
+
+  return `
+    <div class="lineup-cols">
+      <div class="lineup-col">${renderLineupList(homeLineup)}</div>
+      <div class="lineup-col lineup-col-away">${renderLineupList(awayLineup)}</div>
+    </div>
+  `;
+}
+
 function renderTable() {
   const body = document.getElementById("table-body");
   const leagueIds = LEAGUE_FILTERS[state.tableFilter];
@@ -891,6 +979,14 @@ async function loadData() {
         showLoadErrorRow(document.getElementById("table-body"), 10, "the table");
         throw err;
       }),
+    // No dedicated tab/error UI for this one - it only powers the
+    // click-to-expand lineup on Fixtures. A failure here just means that
+    // panel shows "Lineup not available" instead of blocking anything.
+    fetchWithRetry(() => parseCsv(CONFIG.lineupsCsvUrl), "Lineups")
+      .then((lineups) => {
+        state.lineupsByClub = buildLineupsByClub(lineups);
+      })
+      .catch((err) => console.error(err)),
   ];
 
   const results = await Promise.allSettled(tasks);
@@ -983,6 +1079,23 @@ function wireSortableTable(tableId, sortKeyProp, sortDirProp, renderFn) {
 document.getElementById("refresh-btn").addEventListener("click", loadData);
 document.getElementById("fpl-search").addEventListener("input", renderFpl);
 wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
+
+// Fixture cards are rebuilt wholesale on every render, so this listens on
+// the container once (event delegation) rather than re-binding a handler
+// to each card - tapping a card toggles its own lineup panel, rendering it
+// lazily from the already-loaded LineupsCache data (no fetch at click time).
+document.getElementById("fixtures-list").addEventListener("click", (e) => {
+  const card = e.target.closest(".match-card");
+  if (!card) return;
+  const panel = card.querySelector(".lineup-panel");
+  if (!panel) return;
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+  panel.innerHTML = renderLineupPanel(card.dataset.homeId, card.dataset.awayId);
+  panel.hidden = false;
+});
 
 loadData();
 </script>
