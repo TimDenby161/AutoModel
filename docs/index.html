@@ -132,21 +132,35 @@
   }
   .lineup-panel {
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
-    overflow-x: auto;
   }
-  .lineup-pitch { display: flex; gap: 10px; min-width: max-content; }
-  .pitch-team { display: flex; gap: 4px; }
-  .pitch-line { display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; width: 62px; flex-shrink: 0; }
-  .pitch-chip { text-align: center; line-height: 1.25; }
-  .pitch-pos {
+  .lineup-pitch { display: flex; align-items: stretch; gap: 12px; }
+  .pitch-team { flex: 1; min-width: 0; }
+  .pitch-divider { width: 1px; background: var(--border); align-self: stretch; }
+  .pitch-line-label {
+    color: var(--text-muted); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    margin: 10px 0 4px;
+  }
+  .pitch-line-label:first-child { margin-top: 0; }
+  .pitch-player { padding: 3px 0; }
+  .pitch-player-top {
+    display: flex; align-items: baseline; gap: 6px;
+  }
+  .pitch-player-pos {
     color: var(--text-muted); font-size: 9px; font-weight: 700;
-    text-transform: uppercase;
+    text-transform: uppercase; width: 20px; flex-shrink: 0;
   }
-  .pitch-name {
-    font-weight: 600; font-size: 11px; overflow: hidden;
-    text-overflow: ellipsis; white-space: nowrap; max-width: 62px;
+  .pitch-player-name {
+    flex: 1; min-width: 0; font-weight: 600; font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .pitch-meta { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+  .pitch-player-mins {
+    font-weight: 700; font-size: 13px; color: var(--series-blue);
+    flex-shrink: 0;
+  }
+  .pitch-player-meta {
+    margin-left: 26px; color: var(--text-muted); font-size: 10px;
+  }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
@@ -834,27 +848,35 @@ function buildLineupsByClub(rows) {
   return map;
 }
 
-function renderPitchChip(pos, entry) {
+// Attack-to-defense, so each team column reads ST (top) down to GK (bottom) -
+// both teams' attacking players end up in the same band near the top, like
+// two mirrored half-pitches meeting at the halfway line.
+const PITCH_STACK_LINES = [...PITCH_LINES].reverse();
+
+function renderPitchPlayer(pos, entry) {
   return `
-    <div class="pitch-chip">
-      <div class="pitch-pos">${pos}</div>
-      <div class="pitch-name">${escapeHtml(entry.name)}</div>
-      <div class="pitch-meta">${entry.mins}&prime; &middot; ${entry.age}y &middot; ${entry.ability.toFixed(0)}</div>
+    <div class="pitch-player">
+      <div class="pitch-player-top">
+        <span class="pitch-player-pos">${pos}</span>
+        <span class="pitch-player-name">${escapeHtml(entry.name)}</span>
+        <span class="pitch-player-mins">${entry.mins}&prime;</span>
+      </div>
+      <div class="pitch-player-meta">${entry.age}y &middot; ${entry.ability.toFixed(0)}</div>
     </div>
   `;
 }
 
-function renderPitchLine(lineup, line) {
-  const chips = line.positions.flatMap((pos) => {
-    const entries = lineup ? lineup[pos] : null;
-    if (!entries || !entries.length) return [];
-    return entries.map((entry) => renderPitchChip(pos, entry));
-  });
-  return `<div class="pitch-line pitch-${line.key}">${chips.join("")}</div>`;
-}
-
-function renderPitchTeam(lineup, lines) {
-  return lines.map((line) => renderPitchLine(lineup, line)).join("");
+function renderPitchColumn(lineup) {
+  const body = PITCH_STACK_LINES.map((line) => {
+    const players = line.positions.flatMap((pos) => {
+      const entries = lineup ? lineup[pos] : null;
+      if (!entries || !entries.length) return [];
+      return entries.map((entry) => renderPitchPlayer(pos, entry));
+    });
+    if (!players.length) return "";
+    return `<div class="pitch-line-label">${line.key.toUpperCase()}</div>${players.join("")}`;
+  }).join("");
+  return body || `<div class="empty-state">Lineup not available.</div>`;
 }
 
 function renderLineupPanel(homeId, awayId) {
@@ -868,12 +890,11 @@ function renderLineupPanel(homeId, awayId) {
     return `<div class="empty-state">Lineup not available.</div>`;
   }
 
-  const awayLines = [...PITCH_LINES].reverse();
-
   return `
     <div class="lineup-pitch">
-      <div class="pitch-team pitch-home">${renderPitchTeam(homeLineup, PITCH_LINES)}</div>
-      <div class="pitch-team pitch-away">${renderPitchTeam(awayLineup, awayLines)}</div>
+      <div class="pitch-team">${renderPitchColumn(homeLineup)}</div>
+      <div class="pitch-divider"></div>
+      <div class="pitch-team">${renderPitchColumn(awayLineup)}</div>
     </div>
   `;
 }
