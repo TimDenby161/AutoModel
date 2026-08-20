@@ -138,9 +138,8 @@
   .pitch-divider { width: 1px; background: var(--border); align-self: stretch; }
   .pitch-group { margin-top: 10px; }
   .pitch-group:first-child { margin-top: 0; }
-  .pitch-player { padding: 3px 0; }
-  .pitch-player-top {
-    display: flex; align-items: baseline; gap: 6px;
+  .pitch-player {
+    display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
   }
   .pitch-player-pos {
     color: var(--text-muted); font-size: 9px; font-weight: 700;
@@ -150,12 +149,12 @@
     flex: 1; min-width: 0; font-weight: 600; font-size: 12px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .pitch-player-ability {
+    color: var(--text-muted); font-size: 11px; flex-shrink: 0;
+  }
   .pitch-player-mins {
     font-weight: 700; font-size: 13px; color: var(--series-blue);
-    flex-shrink: 0;
-  }
-  .pitch-player-meta {
-    margin-left: 26px; color: var(--text-muted); font-size: 10px;
+    flex-shrink: 0; width: 28px; text-align: right;
   }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
@@ -847,12 +846,10 @@ function buildLineupsByClub(rows) {
 function renderPitchPlayer(pos, entry) {
   return `
     <div class="pitch-player">
-      <div class="pitch-player-top">
-        <span class="pitch-player-pos">${pos}</span>
-        <span class="pitch-player-name">${escapeHtml(entry.name)}</span>
-        <span class="pitch-player-mins">${entry.mins}&prime;</span>
-      </div>
-      <div class="pitch-player-meta">${entry.age}y &middot; ${entry.ability.toFixed(0)}</div>
+      <span class="pitch-player-pos">${pos}</span>
+      <span class="pitch-player-name">${escapeHtml(entry.name)}</span>
+      <span class="pitch-player-ability">${entry.ability.toFixed(0)}</span>
+      <span class="pitch-player-mins">${entry.mins}&prime;</span>
     </div>
   `;
 }
