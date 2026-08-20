@@ -365,7 +365,15 @@ def collect_matches(
             for row in targets:
                 key = str(row["Match ID"])
                 if key in cached:
-                    matches[key] = cached[key]
+                    # cached[key] was read back from the sheet via
+                    # get_all_values(), which returns everything as a
+                    # string - including Match ID, which needs to stay a
+                    # number or every MATCH/INDEX/XLOOKUP formula keyed off
+                    # it (e.g. the Matches tab's lookup formulas) breaks the
+                    # instant this cached row gets rewritten.
+                    reused = dict(cached[key])
+                    reused["Match ID"] = int(key)
+                    matches[key] = reused
                 else:
                     url = f"{MATCH_URL}?{urlencode({'matchId': key})}"
                     jobs[pool.submit(fetch, url, retries, request_delay)] = (key, row)
