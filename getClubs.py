@@ -307,6 +307,11 @@ def build_row(
     data = fetch_club(
         club_id, retries=retries, request_delay=request_delay
     )
+    if not isinstance(data, dict):
+        # FotMob returns HTTP 200 with a literal 4-byte "null" body for a
+        # deleted/merged club ID - valid JSON, so fetch_club doesn't raise,
+        # but json.loads("null") is Python None instead of a dict.
+        raise ValueError(f"Club {club_id} not found (FotMob API returned null)")
     details = data.get("details") or {}
     overview = data.get("overview") or {}
     venue = overview.get("venue") or {}
