@@ -421,7 +421,9 @@
       <div class="filter-row">
         <button type="button" class="filter-chip" data-filter="pl" aria-pressed="true">Prem</button>
         <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
+        <button type="button" class="filter-chip" data-filter="l1" aria-pressed="false">League One</button>
         <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
+        <button type="button" class="filter-chip" data-filter="nl" aria-pressed="false">National League</button>
         <button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>
       </div>
       <div class="filter-row filter-row-more" hidden>
@@ -549,7 +551,9 @@ const PITCH_LINES = [
 const LEAGUE_FILTERS = {
   all: null,
   pl: ["47"],
+  l1: ["108"],
   l2: ["109"],
+  nl: ["117"],
   bl: ["54"],
   ll: ["87"],
   champ: ["48"],
