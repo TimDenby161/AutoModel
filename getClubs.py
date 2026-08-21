@@ -164,6 +164,12 @@ def rate_limit(delay: float) -> None:
         LAST_REQUEST_AT = time.monotonic()
 
 
+class ClubNotFoundError(ValueError):
+    """Raised for a deleted/merged club ID - permanent, not worth retrying,
+    and not the kind of failure that should fail an otherwise-successful
+    sync run (see syncPlayersToSheet.py's sync_clubs)."""
+
+
 def fetch_club(
     club_id: str, *, retries: int, request_delay: float
 ) -> dict[str, Any]:
@@ -311,7 +317,7 @@ def build_row(
         # FotMob returns HTTP 200 with a literal 4-byte "null" body for a
         # deleted/merged club ID - valid JSON, so fetch_club doesn't raise,
         # but json.loads("null") is Python None instead of a dict.
-        raise ValueError(f"Club {club_id} not found (FotMob API returned null)")
+        raise ClubNotFoundError(f"Club {club_id} not found (FotMob API returned null)")
     details = data.get("details") or {}
     overview = data.get("overview") or {}
     venue = overview.get("venue") or {}

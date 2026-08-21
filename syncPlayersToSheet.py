@@ -1288,6 +1288,7 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
     appended_rows: list[list[Any]] = []
     updates: list[tuple[int, list[Any]]] = []
     errors: list[tuple[str, str]] = []
+    fatal_errors: list[tuple[str, str]] = []
 
     jobs = {}
     with ThreadPoolExecutor(max_workers=max(1, args.club_workers)) as executor:
@@ -1303,6 +1304,11 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
                 row = future.result()
             except Exception as exc:
                 errors.append((club_id, str(exc)))
+                # A deleted/merged club ID is permanent, not worth retrying,
+                # and not a real problem with the sync itself - don't let it
+                # fail the whole run the way an unexpected error should.
+                if not isinstance(exc, gclub.ClubNotFoundError):
+                    fatal_errors.append((club_id, str(exc)))
                 safe_print(f"[{done}/{total}] ERROR (club) {club_id}: {exc}")
                 continue
             if club_id in existing_by_id:
@@ -1356,11 +1362,13 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
     if errors:
         write_errors(args.club_errors, errors)
 
+    not_found_count = len(errors) - len(fatal_errors)
     safe_print(
         f"ClubData done. {len(appended_rows):,} new clubs added, "
-        f"{len(updates):,} existing clubs refreshed, {len(errors):,} failed."
+        f"{len(updates):,} existing clubs refreshed, {len(errors):,} failed "
+        f"({not_found_count:,} permanently gone, {len(fatal_errors):,} unexpected)."
     )
-    return errors
+    return fatal_errors
 
 
 def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
