@@ -109,7 +109,7 @@ LEAGUES_LAST_FORMULA_COLUMN = "G"  # every column B..G looks up CompetitionData 
 CLUB_WORKSHEET = "Club"
 CLUB_HEADER_ROW = 1
 CLUB_DATA_START_ROW = 2
-CLUB_LAST_FORMULA_COLUMN = "AG"  # every column B..AG looks up ClubData by ID
+CLUB_LAST_FORMULA_COLUMN = "CP"  # every column B..CP looks up ClubData by ID
 
 MATCHES_WORKSHEET = "Matches"
 MATCHES_HEADER_ROW = 1
