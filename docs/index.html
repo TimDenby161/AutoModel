@@ -157,6 +157,10 @@
     font-weight: 700; font-size: 13px; color: var(--series-blue);
     flex-shrink: 0; width: 28px; text-align: right;
   }
+  .pitch-player-xg {
+    font-weight: 600; font-size: 11px; color: var(--series-aqua);
+    flex-shrink: 0; width: 34px; text-align: right;
+  }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
@@ -998,6 +1002,7 @@ function buildLineupsByClub(rows) {
       mins: toNum(r.Mins),
       age: toNum(r.Age),
       ability: toNum(r.Ability),
+      expGoals: toNum(r.ExpGoals),
     });
   });
   return map;
@@ -1010,6 +1015,7 @@ function renderPitchPlayer(pos, entry) {
       <span class="pitch-player-name">${escapeHtml(entry.name)}</span>
       <span class="pitch-player-ability">${entry.ability.toFixed(0)}</span>
       <span class="pitch-player-mins">${entry.mins}&prime;</span>
+      <span class="pitch-player-xg">${entry.expGoals.toFixed(2)}xG</span>
     </div>
   `;
 }
