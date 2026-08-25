@@ -364,6 +364,33 @@
     font-weight: 700; font-size: 13px; color: var(--series-blue); flex-shrink: 0;
   }
   .ai-player-meta { margin-left: 34px; color: var(--text-muted); font-size: 10px; }
+  .ai-transfers-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
+  }
+  .ai-transfers-title { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+  .ai-transfer-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  }
+  .ai-transfer-row + .ai-transfer-row { border-top: 1px solid var(--border); }
+  .ai-transfer-gw {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--text-muted);
+    width: 30px;
+  }
+  .ai-transfer-players { flex: 1; min-width: 0; }
+  .ai-transfer-out {
+    font-size: 12px; font-weight: 600; color: var(--status-critical);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-transfer-in {
+    font-size: 12px; font-weight: 600; color: var(--status-good);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ai-transfer-type {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 6px; background: var(--chip-bg); color: var(--text-secondary);
+    white-space: nowrap;
+  }
 
   .config-warning {
     background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
@@ -520,8 +547,8 @@
 
   <section class="panel" data-tab="ai-fpl">
     <div class="ai-fpl-actions">
-      <button type="button" id="ai-build-btn" class="action-btn">Build AI FPL Squad</button>
       <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
+      <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
     </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
     <div id="ai-fpl-list" class="card-list"></div>
@@ -551,16 +578,16 @@ const CONFIG = {
   // AIXI tab: repeating "GW{n} XI" blocks (own header row per block), not a
   // single flat table - see parseAiFplBlocks.
   aiFplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=932437441&single=true&output=csv",
-  // Apps Script Web App /exec URL, for the Build Squad / Update Transfers
-  // buttons on the AI FPL tab - set once that's deployed (see doGet's
-  // action= dispatch).
-  aiFplScriptUrl: "",
+  // Apps Script Web App /exec URL, for the Update Transfers / Confirm
+  // Transfers buttons on the AI FPL tab - set once that's deployed (see
+  // doGet's action= dispatch).
+  aiFplScriptUrl: "https://script.google.com/macros/s/AKfycbyLdzAeZxyh9o-2lrOFa72fKZnMujGDTw_qqNnHknkIdZsfJdt7sLBuCQYv9H03c6Qn/exec",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
 const state = {
-  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [],
+  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
   // Competition names the user has collapsed in Fixtures/Results - persists
@@ -726,6 +753,42 @@ function parseAiFplBlocks(rows) {
 
   blocks.forEach((b) => b.bench.sort((a, c) => a.order - c.order));
   return blocks;
+}
+
+// The Transfer plan table (AIXI!L14:U...) sits in the same published rows as
+// the GW XI blocks above, just further right (columns L-U, indices 11-20) -
+// same CSV, different columns, so this is a second pass over the same rows
+// rather than a second fetch.
+function parseAiFplTransfers(rows) {
+  let title = "";
+  let headerRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const l = (rows[i][11] || "").trim();
+    if (/^Transfers from current AIXI squad/i.test(l)) title = l;
+    if (l === "GW" && (rows[i][12] || "").trim() === "Sell") {
+      headerRow = i;
+      break;
+    }
+  }
+  if (headerRow < 0) return { title, moves: [] };
+
+  const moves = [];
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const gw = Number((row[11] || "").trim());
+    if (!Number.isFinite(gw) || !row[11]) break; // hit the trailing summary rows or end of the table
+    const [, sell, , buy, , type, gain] = row.slice(11, 20);
+    if ((type || "").trim().toUpperCase() === "ROLL") continue; // nothing to action for a rolled week
+    if (!(sell || "").trim() && !(buy || "").trim()) continue;
+    moves.push({
+      gw,
+      sell: (sell || "").trim(),
+      buy: (buy || "").trim(),
+      type: (type || "").trim(),
+      gain: toNum(gain),
+    });
+  }
+  return { title, moves };
 }
 
 function toNum(v) {
@@ -1199,16 +1262,40 @@ function renderAiPlayerRow(p) {
   `;
 }
 
+function renderAiTransferRow(m) {
+  return `
+    <div class="ai-transfer-row">
+      <span class="ai-transfer-gw">GW${m.gw}</span>
+      <div class="ai-transfer-players">
+        <div class="ai-transfer-out">OUT &nbsp;${escapeHtml(m.sell)}</div>
+        <div class="ai-transfer-in">IN &nbsp;&nbsp;${escapeHtml(m.buy)}</div>
+      </div>
+      <span class="ai-transfer-type">${escapeHtml(m.type)}</span>
+    </div>
+  `;
+}
+
 function renderAiFpl() {
   const container = document.getElementById("ai-fpl-list");
   const blocks = [...state.aiFpl].sort((a, b) => a.gw - b.gw);
+  const transfers = state.aiFplTransfers || { title: "", moves: [] };
+
+  const transfersHtml = `
+    <div class="ai-transfers-card">
+      <div class="ai-gw-header"><span>Transfers</span></div>
+      ${transfers.title ? `<div class="ai-transfers-title">${escapeHtml(transfers.title)}</div>` : ""}
+      ${transfers.moves.length
+        ? transfers.moves.map(renderAiTransferRow).join("")
+        : `<div class="ai-transfers-title">No transfers currently planned - hit Update Transfers to check.</div>`}
+    </div>
+  `;
 
   if (!blocks.length) {
-    container.innerHTML = `<div class="empty-state">No AI FPL squad data yet.</div>`;
+    container.innerHTML = transfersHtml + `<div class="empty-state">No AI FPL squad data yet.</div>`;
     return;
   }
 
-  container.innerHTML = blocks.map((b) => `
+  container.innerHTML = transfersHtml + blocks.map((b) => `
     <div class="ai-gw-card">
       <div class="ai-gw-header">
         <span>GW${b.gw}</span>
@@ -1322,6 +1409,7 @@ async function loadData() {
     fetchWithRetry(() => parseCsvRaw(CONFIG.aiFplCsvUrl), "AI FPL")
       .then((rows) => {
         state.aiFpl = parseAiFplBlocks(rows);
+        state.aiFplTransfers = parseAiFplTransfers(rows);
         renderAiFpl();
       })
       .catch((err) => {
@@ -1480,11 +1568,12 @@ async function runAiFplAction(action, btn, label) {
   }
 }
 
-document.getElementById("ai-build-btn").addEventListener("click", (e) => {
-  runAiFplAction("build_squad", e.target, "Build Squad");
-});
 document.getElementById("ai-transfers-btn").addEventListener("click", (e) => {
   runAiFplAction("update_transfers", e.target, "Update Transfers");
+});
+document.getElementById("ai-confirm-btn").addEventListener("click", (e) => {
+  if (!confirm("Confirm locks in this Gameweek's transfer(s) on the AIXI squad list. Only do this once you've actually made the moves in real FPL. Continue?")) return;
+  runAiFplAction("confirm_transfers", e.target, "Confirm Transfers");
 });
 
 loadData();
