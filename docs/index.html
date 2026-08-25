@@ -364,9 +364,13 @@
     font-weight: 700; font-size: 13px; color: var(--series-blue); flex-shrink: 0;
   }
   .ai-player-meta { margin-left: 34px; color: var(--text-muted); font-size: 10px; }
-  .ai-transfers-card {
+  .ai-top-row {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;
+  }
+  .ai-transfers-card, .ai-squad-card {
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
+    border-radius: 10px; padding: 10px 12px;
+    flex: 1 1 260px; min-width: 260px;
   }
   .ai-transfers-title { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
   .ai-transfer-row {
@@ -587,7 +591,7 @@ const CONFIG = {
 // -------------------------------------------------------------------
 
 const state = {
-  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
+  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
   // Competition names the user has collapsed in Fixtures/Results - persists
@@ -789,6 +793,36 @@ function parseAiFplTransfers(rows) {
     });
   }
   return { title, moves };
+}
+
+// The current-squad table (AIXI!A8:J23) sits in the same published rows too,
+// above the GW XI blocks - same CSV, same second pass.
+function parseAiFplCurrentSquad(rows) {
+  let headerRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if ((row[0] || "").trim() === "Pos" && (row[1] || "").trim() === "Player" && (row[2] || "").trim() === "Club") {
+      headerRow = i;
+      break;
+    }
+  }
+  if (headerRow < 0) return [];
+
+  const squad = [];
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const pos = (row[0] || "").trim();
+    const player = (row[1] || "").trim();
+    if (!pos || !player) break;
+    squad.push({
+      pos,
+      player,
+      club: (row[2] || "").trim(),
+      price: toNum(row[3]),
+      xpts: toNum(row[5]), // first of the GW columns - next-gameweek projected points
+    });
+  }
+  return squad;
 }
 
 function toNum(v) {
@@ -1279,6 +1313,7 @@ function renderAiFpl() {
   const container = document.getElementById("ai-fpl-list");
   const blocks = [...state.aiFpl].sort((a, b) => a.gw - b.gw);
   const transfers = state.aiFplTransfers || { title: "", moves: [] };
+  const squad = state.aiFplSquad || [];
 
   const transfersHtml = `
     <div class="ai-transfers-card">
@@ -1290,12 +1325,23 @@ function renderAiFpl() {
     </div>
   `;
 
+  const squadHtml = `
+    <div class="ai-squad-card">
+      <div class="ai-gw-header"><span>Current Squad</span><span>${squad.length}</span></div>
+      ${squad.length
+        ? squad.map(renderAiPlayerRow).join("")
+        : `<div class="ai-transfers-title">No current squad data yet.</div>`}
+    </div>
+  `;
+
+  const topRow = `<div class="ai-top-row">${transfersHtml}${squadHtml}</div>`;
+
   if (!blocks.length) {
-    container.innerHTML = transfersHtml + `<div class="empty-state">No AI FPL squad data yet.</div>`;
+    container.innerHTML = topRow + `<div class="empty-state">No AI FPL squad data yet.</div>`;
     return;
   }
 
-  container.innerHTML = transfersHtml + blocks.map((b) => `
+  container.innerHTML = topRow + blocks.map((b) => `
     <div class="ai-gw-card">
       <div class="ai-gw-header">
         <span>GW${b.gw}</span>
@@ -1410,6 +1456,7 @@ async function loadData() {
       .then((rows) => {
         state.aiFpl = parseAiFplBlocks(rows);
         state.aiFplTransfers = parseAiFplTransfers(rows);
+        state.aiFplSquad = parseAiFplCurrentSquad(rows);
         renderAiFpl();
       })
       .catch((err) => {
