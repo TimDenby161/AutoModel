@@ -164,7 +164,15 @@
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
-    display: flex; justify-content: space-between;
+    text-align: right;
+  }
+  .comp-group { margin-top: 16px; }
+  .comp-group:first-child { margin-top: 0; }
+  .comp-group-header {
+    font-size: 12px; font-weight: 700; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    padding-bottom: 4px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
   }
   .match-teams {
     display: flex; align-items: center; justify-content: space-between;
@@ -798,6 +806,24 @@ function matchProbsRow(m) {
 // the list looking empty when there's plenty more coming up.
 const FIXTURES_LOOKAHEAD_COUNT = 20;
 
+// Groups an already-sorted match list by competition, preserving each
+// group's position from wherever its first match falls in that order - so
+// fixtures group with the soonest-kicking-off competition first, and
+// results group with the most-recently-finished competition first.
+function groupByCompetition(matches) {
+  const order = [];
+  const groups = {};
+  matches.forEach((m) => {
+    const league = m.League || "Other";
+    if (!groups[league]) {
+      groups[league] = [];
+      order.push(league);
+    }
+    groups[league].push(m);
+  });
+  return order.map((league) => ({ league, matches: groups[league] }));
+}
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
@@ -819,25 +845,33 @@ function renderFixtures() {
   const note = hasToday
     ? ""
     : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
-  container.innerHTML = note + upcoming.map((m) => `
-    <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
-      <div class="match-comp">
-        <span>${escapeHtml(m.League || "")}</span>
-        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+
+  const groups = groupByCompetition(upcoming);
+  container.innerHTML = note + groups.map((g) => `
+    <div class="comp-group">
+      <div class="comp-group-header">${escapeHtml(g.league)}</div>
+      <div class="card-list">
+        ${g.matches.map((m) => `
+          <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
+            <div class="match-comp">
+              <span>${escapeHtml(formatKickoff(m.Date))}</span>
+            </div>
+            <div class="match-teams">
+              <div class="match-team">
+                ${escapeHtml(m.Home)}
+                ${clubScoreLabel(m.HomeScr)}
+              </div>
+              ${matchScoreCenter(m)}
+              <div class="match-team away">
+                ${escapeHtml(m.Away)}
+                ${clubScoreLabel(m.AwayScr)}
+              </div>
+            </div>
+            ${matchProbsRow(m)}
+            <div class="lineup-panel" hidden></div>
+          </div>
+        `).join("")}
       </div>
-      <div class="match-teams">
-        <div class="match-team">
-          ${escapeHtml(m.Home)}
-          ${clubScoreLabel(m.HomeScr)}
-        </div>
-        ${matchScoreCenter(m)}
-        <div class="match-team away">
-          ${escapeHtml(m.Away)}
-          ${clubScoreLabel(m.AwayScr)}
-        </div>
-      </div>
-      ${matchProbsRow(m)}
-      <div class="lineup-panel" hidden></div>
     </div>
   `).join("");
 }
@@ -877,22 +911,30 @@ function renderResults() {
     container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
     return;
   }
-  container.innerHTML = recent.map((m) => `
-    <div class="match-card">
-      <div class="match-comp">
-        <span>${escapeHtml(m.League || "")}</span>
-        <span>${escapeHtml(formatKickoff(m.Date))}</span>
-      </div>
-      <div class="match-teams">
-        <div class="match-team">
-          ${escapeHtml(m.Home)}
-          ${clubScoreLabel(m.HomeScr)}
-        </div>
-        ${finalScoreCenter(m)}
-        <div class="match-team away">
-          ${escapeHtml(m.Away)}
-          ${clubScoreLabel(m.AwayScr)}
-        </div>
+
+  const groups = groupByCompetition(recent);
+  container.innerHTML = groups.map((g) => `
+    <div class="comp-group">
+      <div class="comp-group-header">${escapeHtml(g.league)}</div>
+      <div class="card-list">
+        ${g.matches.map((m) => `
+          <div class="match-card">
+            <div class="match-comp">
+              <span>${escapeHtml(formatKickoff(m.Date))}</span>
+            </div>
+            <div class="match-teams">
+              <div class="match-team">
+                ${escapeHtml(m.Home)}
+                ${clubScoreLabel(m.HomeScr)}
+              </div>
+              ${finalScoreCenter(m)}
+              <div class="match-team away">
+                ${escapeHtml(m.Away)}
+                ${clubScoreLabel(m.AwayScr)}
+              </div>
+            </div>
+          </div>
+        `).join("")}
       </div>
     </div>
   `).join("");
