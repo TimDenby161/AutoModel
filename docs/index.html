@@ -897,7 +897,14 @@ function renderFixtures() {
     return;
   }
 
-  const upcoming = allUpcoming.slice(0, FIXTURES_LOOKAHEAD_COUNT);
+  // Everything within the guaranteed window always makes the list; beyond
+  // that, backfill with the next-soonest fixtures up to the cap so a quiet
+  // stretch still shows plenty coming up.
+  const guaranteedThrough = new Date(todayStart);
+  guaranteedThrough.setDate(guaranteedThrough.getDate() + FIXTURES_GUARANTEED_DAYS);
+  const guaranteed = allUpcoming.filter((m) => new Date(m.Date) < guaranteedThrough);
+  const rest = allUpcoming.filter((m) => new Date(m.Date) >= guaranteedThrough);
+  const upcoming = guaranteed.concat(rest).slice(0, Math.max(FIXTURES_LOOKAHEAD_COUNT, guaranteed.length));
   const hasToday = upcoming.some((m) => isSameLocalDay(m.Date, today));
   const note = hasToday
     ? ""
