@@ -1,0 +1,16 @@
+Skipping PlayerData sync.
+Loaded 874 club IDs from F:\Projects\AutoModel\club_ids.txt
+MatchData/Matches are scoped to 25 competition ID(s) from F:\Projects\AutoModel\matchdata_competition_ids.txt.
+MatchData: 6,402 matches already in the sheet, 553 already fully detailed.
+MatchData: 13,672 existing row(s) are outside the kept competitions and will be deleted after this run's updates/appends.
+Enriching 5256 completed matches; 553 reusable rows found...
+Filling round info for 15610 other fixtures (5830 reused, 9780 to fetch)...
+Skipped 6,369 matches that are finished or not due yet (nothing to update).
+Skipped 13,665 fetched match(es) outside the kept competitions.
+Updated 33/33 existing matches in the sheet
+Removed 13,672 out-of-scope row(s) from MatchData.
+MatchData done. 0 new matches added, 33 existing matches refreshed, 0 failed.
+F:\Projects\AutoModel\syncPlayersToSheet.py:512: DeprecationWarning: The order of arguments in worksheet.update() has changed. Please pass values first and range_name secondor used named arguments (range_name=, values=)
+  lambda: worksheet.update(
+Matches tab: wrote 6,402 IDs to column A, copied formulas into 709 new row(s).
+Individual Results: wrote 120 finished match(es) starting under 2026-08-23; copied formulas into 0 row(s); skipped 0 future-dated finished match(es).

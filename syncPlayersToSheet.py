@@ -251,6 +251,17 @@ def parse_args() -> argparse.Namespace:
         default=folder / "club_ids.txt",
         help="TXT or CSV containing club IDs (default: club_ids.txt)",
     )
+    parser.add_argument(
+        "--matchdata-competition-input",
+        type=Path,
+        default=folder / "matchdata_competition_ids.txt",
+        help=(
+            "TXT or CSV of competition IDs to keep in MatchData/Matches - a fetched or "
+            "existing match is kept if its Competition ID OR Parent Competition ID is in "
+            "this list. If the file is missing, no filtering is applied. Default: "
+            "matchdata_competition_ids.txt"
+        ),
+    )
     parser.add_argument("--match-worksheet", default="MatchData")
     parser.add_argument(
         "--match-csv-output",
@@ -519,6 +530,15 @@ def sync_lookup_tab(
             description=f"Clear {worksheet_name} leftover formulas",
         )
 
+    # If the ID list shrank enough that the sheet's actual row count is now
+    # bigger than it needs to be, shrink it back down - the clears above only
+    # blank cell content, they don't free up the workbook's 10M-cell budget.
+    if worksheet.row_count > new_last_row:
+        sheet_call(
+            lambda: worksheet.resize(rows=new_last_row),
+            description=f"Shrink {worksheet_name} sheet",
+        )
+
     added_rows = new_last_row - formula_last_row
     if added_rows > 0 and formula_last_row >= data_start_row:
         copy_request = {
@@ -730,9 +750,58 @@ def ensure_individual_result_formula_rows(
     return end_row - copy_start_row + 1
 
 
-def sync_individual_results(source_spreadsheet, args: argparse.Namespace) -> None:
-    source_matches = source_spreadsheet.worksheet(MATCHES_WORKSHEET)
-    source_matchdata = source_spreadsheet.worksheet(args.match_worksheet)
+def load_alt_names(spreadsheet) -> dict[str, str]:
+    """Mirrors the Matches tab's HomeAlt/AwayAlt formulas
+    (IFERROR(INDEX(AltNames!B:B, MATCH(name, AltNames!A:A, 0)), name)) in
+    Python, so Individual Results can be built without reading the Matches
+    tab at all."""
+    try:
+        worksheet = spreadsheet.worksheet("AltNames")
+    except gspread.WorksheetNotFound:
+        return {}
+    values = sheet_call(lambda: worksheet.get("A:B"), description="Read AltNames tab")
+    mapping: dict[str, str] = {}
+    for row in values[1:]:
+        name, alt = value_at(row, 0), value_at(row, 1)
+        if name and alt:
+            mapping[str(name).strip()] = str(alt).strip()
+    return mapping
+
+
+def individual_results_rows_from_matches(
+    spreadsheet, all_matches: dict[str, dict[str, Any]]
+) -> list[tuple[Any, Any, Any, Any, Any]]:
+    """Builds Individual Results source rows straight from this run's full,
+    unfiltered match fetch - independent of whatever competitions MatchData/
+    Matches themselves are currently scoped to, so Individual Results (the
+    Club Ranking spreadsheet) keeps receiving every competition's finished
+    matches even after MatchData/Matches are narrowed down."""
+    alt_names = load_alt_names(spreadsheet)
+    rows: list[tuple[Any, Any, Any, Any, Any]] = []
+    for row in all_matches.values():
+        if not row.get("Finished") or row.get("Cancelled"):
+            continue
+        home = str(row.get("Home Club", "") or "")
+        away = str(row.get("Away Club", "") or "")
+        rows.append((
+            row.get("Match UTC", ""),
+            alt_names.get(home, home),
+            alt_names.get(away, away),
+            row.get("Home Score", ""),
+            row.get("Away Score", ""),
+        ))
+    return rows
+
+
+def individual_results_rows_from_sheet(
+    spreadsheet, args: argparse.Namespace
+) -> list[tuple[Any, Any, Any, Any, Any]]:
+    """Fallback used only when this run has no fresh in-memory match data
+    (--only-individual-results, or --skip-matches) - reads whatever's
+    currently in the Matches/MatchData tabs, same as before this function was
+    split up."""
+    source_matches = spreadsheet.worksheet(MATCHES_WORKSHEET)
+    source_matchdata = spreadsheet.worksheet(args.match_worksheet)
 
     matches_values = sheet_call(
         lambda: source_matches.get("A:Q", value_render_option="FORMATTED_VALUE"),
@@ -742,8 +811,7 @@ def sync_individual_results(source_spreadsheet, args: argparse.Namespace) -> Non
         source_matchdata, "Read MatchData for Individual Results finished statuses"
     )
     if not matches_values or not matchdata_values:
-        safe_print("Individual Results: source Matches/MatchData is empty; nothing to copy.")
-        return
+        return []
 
     matchdata_header = matchdata_values[0]
     match_id_col = matchdata_header.index("Match ID")
@@ -754,6 +822,35 @@ def sync_individual_results(source_spreadsheet, args: argparse.Namespace) -> Non
         finished = normalize_sheet_value(value_at(row, finished_col))
         if match_id and finished in {"1", "true", "yes", "finished"}:
             finished_ids.add(match_id)
+
+    rows: list[tuple[Any, Any, Any, Any, Any]] = []
+    for row in matches_values[MATCHES_DATA_START_ROW - 1 :]:
+        match_id = normalize_sheet_value(value_at(row, 0))
+        if match_id not in finished_ids:
+            continue
+        rows.append((
+            value_at(row, 1),   # B: Date
+            value_at(row, 11),  # L: HomeAlt
+            value_at(row, 14),  # O: AwayAlt
+            value_at(row, 15),  # P: HomeS
+            value_at(row, 16),  # Q: AwayS
+        ))
+    return rows
+
+
+def sync_individual_results(
+    source_spreadsheet,
+    args: argparse.Namespace,
+    all_matches: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    finished_rows = (
+        individual_results_rows_from_matches(source_spreadsheet, all_matches)
+        if all_matches is not None
+        else individual_results_rows_from_sheet(source_spreadsheet, args)
+    )
+    if not finished_rows:
+        safe_print("Individual Results: no finished match data available; nothing to copy.")
+        return
 
     destination_spreadsheet = open_spreadsheet(
         args.individual_results_spreadsheet_id, args.credentials
@@ -797,18 +894,7 @@ def sync_individual_results(source_spreadsheet, args: argparse.Namespace) -> Non
     today = datetime.now().date()
     skipped_future = 0
     rows_to_add: list[tuple[date, tuple[Any, Any, Any, Any, Any]]] = []
-    for row in matches_values[MATCHES_DATA_START_ROW - 1 :]:
-        match_id = normalize_sheet_value(value_at(row, 0))
-        if match_id not in finished_ids:
-            continue
-
-        result_values = (
-            value_at(row, 1),   # B: Date
-            value_at(row, 11),  # L: HomeAlt
-            value_at(row, 14),  # O: AwayAlt
-            value_at(row, 15),  # P: HomeS
-            value_at(row, 16),  # Q: AwayS
-        )
+    for result_values in finished_rows:
         key = individual_result_key(result_values)
         if not key:
             continue
@@ -1114,9 +1200,86 @@ def write_errors(path: Path, errors: list[tuple[str, str]]) -> None:
         writer.writerows(errors)
 
 
-def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, str]]:
+def load_matchdata_competition_ids(args: argparse.Namespace) -> set[str] | None:
+    """The competition allow-list for MatchData/Matches - a match is kept if its
+    Competition ID OR Parent Competition ID is in this set (group-stage
+    competitions like the EFL Trophy or Champions League tag individual
+    matches with a per-group Competition ID, but share one Parent Competition
+    ID across the whole tournament). Returns None (no filtering) if the file
+    doesn't exist, so this stays optional/backward compatible."""
+    path = args.matchdata_competition_input
+    if not path.exists():
+        return None
+    ids = set(gmatch.load_ids(path))
+    return ids or None
+
+
+def match_in_scope(row: dict[str, Any], keep_competition_ids: set[str] | None) -> bool:
+    if not keep_competition_ids:
+        return True
+    return (
+        str(row.get("Competition ID", "")) in keep_competition_ids
+        or str(row.get("Parent Competition ID", "")) in keep_competition_ids
+    )
+
+
+def delete_sheet_rows(spreadsheet, worksheet, row_numbers: list[int], *, description: str) -> None:
+    """Delete whole rows (1-based) from a worksheet, freeing their cells from
+    the workbook's 10M-cell budget - unlike clearing content, this actually
+    shrinks the sheet's row count. Adjacent row numbers are merged into
+    ranges, and ranges are applied highest-row-first so a deletion never
+    invalidates the row numbers still queued for later ranges."""
+    if not row_numbers:
+        return
+    ordered = sorted(set(row_numbers))
+    ranges: list[tuple[int, int]] = []
+    for row_number in ordered:
+        if ranges and ranges[-1][1] == row_number - 1:
+            ranges[-1] = (ranges[-1][0], row_number)
+        else:
+            ranges.append((row_number, row_number))
+    ranges.sort(key=lambda r: r[0], reverse=True)
+
+    chunk_size = 200
+    for start in range(0, len(ranges), chunk_size):
+        chunk = ranges[start : start + chunk_size]
+        requests = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "dimension": "ROWS",
+                        "startIndex": lo - 1,
+                        "endIndex": hi,
+                    }
+                }
+            }
+            for lo, hi in chunk
+        ]
+        sheet_call(
+            lambda requests=requests: spreadsheet.batch_update({"requests": requests}),
+            description=f"{description} (range {start + 1}-{start + len(chunk)} of {len(ranges)})",
+        )
+
+    # Mirror gspread's own delete_dimension() bookkeeping so worksheet.row_count
+    # reflects reality for any caller that keeps using this worksheet object
+    # afterward, instead of silently going stale.
+    deleted = sum(hi - lo + 1 for lo, hi in ranges)
+    worksheet._properties["gridProperties"]["rowCount"] -= deleted
+
+
+def sync_matches(
+    spreadsheet, args: argparse.Namespace
+) -> tuple[list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
     club_ids = gmatch.load_ids(args.club_input)
     safe_print(f"Loaded {len(club_ids):,} club IDs from {args.club_input}")
+
+    keep_competition_ids = load_matchdata_competition_ids(args)
+    if keep_competition_ids:
+        safe_print(
+            f"MatchData/Matches are scoped to {len(keep_competition_ids):,} competition "
+            f"ID(s) from {args.matchdata_competition_input}."
+        )
 
     worksheet = get_or_create_worksheet(spreadsheet, args.match_worksheet, len(gmatch.HEADERS))
     existing_values = read_existing_values(worksheet, "Read MatchData sheet")
@@ -1138,13 +1301,18 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
     existing_by_id: dict[str, int] = {}
     cached: dict[str, dict[str, Any]] = {}
     cached_all: dict[str, dict[str, Any]] = {}
+    out_of_scope_rows: list[int] = []
     for offset, row in enumerate(existing_values[1:]):
         padded = row + [""] * (header_len - len(row))
         match_id = str(padded[match_id_col]).strip()
         if not match_id:
             continue
-        existing_by_id[match_id] = offset + 2  # +2: header row + 1-based
+        row_number = offset + 2  # +2: header row + 1-based
         row_dict = dict(zip(gmatch.HEADERS, padded))
+        if not match_in_scope(row_dict, keep_competition_ids):
+            out_of_scope_rows.append(row_number)
+            continue
+        existing_by_id[match_id] = row_number
         cached_all[match_id] = row_dict
         if str(row_dict.get("Detailed Data", "")) == "1":
             cached[match_id] = row_dict
@@ -1153,6 +1321,11 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
         f"MatchData: {len(existing_by_id):,} matches already in the sheet, "
         f"{len(cached):,} already fully detailed."
     )
+    if out_of_scope_rows:
+        safe_print(
+            f"MatchData: {len(out_of_scope_rows):,} existing row(s) are outside the kept "
+            "competitions and will be deleted after this run's updates/appends."
+        )
 
     matches, errors = gmatch.collect_matches(
         club_ids,
@@ -1173,7 +1346,11 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
     updates: list[tuple[int, list[Any]]] = []
     appended_rows: list[list[Any]] = []
     skipped_not_due = 0
+    skipped_out_of_scope = 0
     for match_id, row_dict in matches.items():
+        if not match_in_scope(row_dict, keep_competition_ids):
+            skipped_out_of_scope += 1
+            continue
         row = [row_dict.get(header, "") for header in gmatch.HEADERS]
         if match_id in existing_by_id:
             # An existing row is only worth rewriting if it's not finished
@@ -1194,6 +1371,8 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
 
     if skipped_not_due:
         safe_print(f"Skipped {skipped_not_due:,} matches that are finished or not due yet (nothing to update).")
+    if skipped_out_of_scope:
+        safe_print(f"Skipped {skipped_out_of_scope:,} fetched match(es) outside the kept competitions.")
 
     last_col = column_letters(header_len)
     if updates:
@@ -1219,6 +1398,17 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
                 description=f"Append match rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
+
+    if out_of_scope_rows:
+        # Deleted last, using the row numbers captured before this run's
+        # updates/appends: in-place updates don't move rows and appends only
+        # add beyond the current last row, so those original row numbers are
+        # still accurate right up until this point.
+        delete_sheet_rows(
+            spreadsheet, worksheet, out_of_scope_rows,
+            description="Delete out-of-scope MatchData rows",
+        )
+        safe_print(f"Removed {len(out_of_scope_rows):,} out-of-scope row(s) from MatchData.")
 
     # Rebuild the CSV mirror from the full dataset - untouched existing rows
     # (anything outside this run's current-season scope) plus this run's
@@ -1248,7 +1438,7 @@ def sync_matches(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str, 
         f"MatchData done. {len(appended_rows):,} new matches added, "
         f"{len(updates):,} existing matches refreshed, {len(errors):,} failed."
     )
-    return errors
+    return errors, matches
 
 
 def fetch_club_row(club_id: str, args: argparse.Namespace) -> list[Any]:
@@ -1502,6 +1692,7 @@ def main() -> int:
     args.competition_csv_output = args.competition_csv_output.resolve()
     args.competition_errors = args.competition_errors.resolve()
     args.club_input = args.club_input.resolve()
+    args.matchdata_competition_input = args.matchdata_competition_input.resolve()
     args.match_csv_output = args.match_csv_output.resolve()
     args.match_errors = args.match_errors.resolve()
     args.club_csv_output = args.club_csv_output.resolve()
@@ -1541,23 +1732,20 @@ def main() -> int:
             sync_leagues_tab(spreadsheet, competition_ids)
 
     match_errors: list[tuple[str, str, str]] = []
+    all_matches: dict[str, dict[str, Any]] | None = None
     if not args.skip_matches:
-        match_errors = sync_matches(spreadsheet, args)
+        match_errors, all_matches = sync_matches(spreadsheet, args)
         if not args.skip_matches_tab:
             match_worksheet = spreadsheet.worksheet(args.match_worksheet)
             matchdata_ids = id_column_values(match_worksheet, "Read final MatchData IDs")[1:]
             sync_matches_tab(spreadsheet, matchdata_ids)
 
     if not args.skip_individual_results:
-        if args.skip_matches:
+        if all_matches is None:
             safe_print(
                 "Individual Results: MatchData sync was skipped; copying from current sheet values."
             )
-        elif args.skip_matches_tab:
-            safe_print(
-                "Individual Results: Matches tab sync was skipped; copying from current Matches tab values."
-            )
-        sync_individual_results(spreadsheet, args)
+        sync_individual_results(spreadsheet, args, all_matches=all_matches)
 
     club_errors: list[tuple[str, str]] = []
     if not args.skip_clubs:
