@@ -824,6 +824,11 @@ function matchProbsRow(m) {
 // with nothing at all, e.g. a season that hasn't started) shouldn't leave
 // the list looking empty when there's plenty more coming up.
 const FIXTURES_LOOKAHEAD_COUNT = 20;
+// Every fixture within this many days is always shown, even past the cap
+// above - otherwise a competition with few near-term matches (e.g. a
+// midweek cup tie) can get crowded off the list by busier leagues with more
+// fixtures on the same days.
+const FIXTURES_GUARANTEED_DAYS = 4;
 
 // Groups an already-sorted match list by competition, preserving each
 // group's position from wherever its first match falls in that order - so
