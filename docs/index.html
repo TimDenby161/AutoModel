@@ -1334,7 +1334,7 @@ function renderAiFpl() {
     </div>
   `;
 
-  const topRow = `<div class="ai-top-row">${transfersHtml}${squadHtml}</div>`;
+  const topRow = `<div class="ai-top-row">${squadHtml}${transfersHtml}</div>`;
 
   if (!blocks.length) {
     container.innerHTML = topRow + `<div class="empty-state">No AI FPL squad data yet.</div>`;
