@@ -169,11 +169,25 @@
   .comp-group { margin-top: 16px; }
   .comp-group:first-child { margin-top: 0; }
   .comp-group-header {
+    display: flex; align-items: center; gap: 6px;
     font-size: 12px; font-weight: 700; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.03em;
     padding-bottom: 4px; margin-bottom: 8px;
     border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none;
   }
+  .comp-group-header:active { opacity: 0.7; }
+  .comp-group-caret {
+    display: inline-block; font-size: 10px; width: 10px;
+    color: var(--text-muted); flex-shrink: 0;
+  }
+  .comp-group-name { flex: 1; min-width: 0; }
+  .comp-group-count {
+    color: var(--text-muted); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .comp-group.collapsed .card-list { display: none; }
+  .comp-group.collapsed .comp-group-header { border-bottom-color: transparent; margin-bottom: 0; }
   .match-teams {
     display: flex; align-items: center; justify-content: space-between;
     margin-top: 6px; gap: 8px;
@@ -549,6 +563,11 @@ const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
+  // Competition names the user has collapsed in Fixtures/Results - persists
+  // across re-renders (filter changes, refresh) since it lives in state, not
+  // just the DOM.
+  collapsedFixtureGroups: new Set(),
+  collapsedResultGroups: new Set(),
 };
 
 const LINEUP_POSITIONS = ["GK","LB","CB","RB","DM","LWB","RWB","LM","CM","RM","LW","AM","RW","ST"];
@@ -824,6 +843,39 @@ function groupByCompetition(matches) {
   return order.map((league) => ({ league, matches: groups[league] }));
 }
 
+// Shared by renderFixtures/renderResults - wraps each competition's cards in
+// a collapsible group. collapsedSet is whichever of state.collapsedFixture/
+// ResultGroups applies, so a group's open/closed state survives re-renders.
+function renderGroupedMatches(groups, collapsedSet, cardHtmlFn) {
+  return groups.map((g) => {
+    const collapsed = collapsedSet.has(g.league);
+    return `
+      <div class="comp-group${collapsed ? " collapsed" : ""}" data-league="${escapeHtml(g.league)}">
+        <div class="comp-group-header">
+          <span class="comp-group-caret">${collapsed ? "&#9656;" : "&#9662;"}</span>
+          <span class="comp-group-name">${escapeHtml(g.league)}</span>
+          <span class="comp-group-count">${g.matches.length}</span>
+        </div>
+        <div class="card-list">${g.matches.map(cardHtmlFn).join("")}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function toggleGroupCollapse(groupEl, collapsedSet) {
+  if (!groupEl) return;
+  const league = groupEl.dataset.league;
+  const collapsed = collapsedSet.has(league);
+  if (collapsed) {
+    collapsedSet.delete(league);
+  } else {
+    collapsedSet.add(league);
+  }
+  groupEl.classList.toggle("collapsed", !collapsed);
+  const caret = groupEl.querySelector(".comp-group-caret");
+  if (caret) caret.innerHTML = !collapsed ? "&#9656;" : "&#9662;";
+}
+
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
@@ -847,33 +899,26 @@ function renderFixtures() {
     : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
 
   const groups = groupByCompetition(upcoming);
-  container.innerHTML = note + groups.map((g) => `
-    <div class="comp-group">
-      <div class="comp-group-header">${escapeHtml(g.league)}</div>
-      <div class="card-list">
-        ${g.matches.map((m) => `
-          <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
-            <div class="match-comp">
-              <span>${escapeHtml(formatKickoff(m.Date))}</span>
-            </div>
-            <div class="match-teams">
-              <div class="match-team">
-                ${escapeHtml(m.Home)}
-                ${clubScoreLabel(m.HomeScr)}
-              </div>
-              ${matchScoreCenter(m)}
-              <div class="match-team away">
-                ${escapeHtml(m.Away)}
-                ${clubScoreLabel(m.AwayScr)}
-              </div>
-            </div>
-            ${matchProbsRow(m)}
-            <div class="lineup-panel" hidden></div>
-          </div>
-        `).join("")}
+  container.innerHTML = note + renderGroupedMatches(groups, state.collapsedFixtureGroups, (m) => `
+    <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
+      <div class="match-comp">
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
       </div>
+      <div class="match-teams">
+        <div class="match-team">
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.HomeScr)}
+        </div>
+        ${matchScoreCenter(m)}
+        <div class="match-team away">
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.AwayScr)}
+        </div>
+      </div>
+      ${matchProbsRow(m)}
+      <div class="lineup-panel" hidden></div>
     </div>
-  `).join("");
+  `);
 }
 
 function projScoreSub(raw) {
@@ -913,31 +958,24 @@ function renderResults() {
   }
 
   const groups = groupByCompetition(recent);
-  container.innerHTML = groups.map((g) => `
-    <div class="comp-group">
-      <div class="comp-group-header">${escapeHtml(g.league)}</div>
-      <div class="card-list">
-        ${g.matches.map((m) => `
-          <div class="match-card">
-            <div class="match-comp">
-              <span>${escapeHtml(formatKickoff(m.Date))}</span>
-            </div>
-            <div class="match-teams">
-              <div class="match-team">
-                ${escapeHtml(m.Home)}
-                ${clubScoreLabel(m.HomeScr)}
-              </div>
-              ${finalScoreCenter(m)}
-              <div class="match-team away">
-                ${escapeHtml(m.Away)}
-                ${clubScoreLabel(m.AwayScr)}
-              </div>
-            </div>
-          </div>
-        `).join("")}
+  container.innerHTML = renderGroupedMatches(groups, state.collapsedResultGroups, (m) => `
+    <div class="match-card">
+      <div class="match-comp">
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+      </div>
+      <div class="match-teams">
+        <div class="match-team">
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.HomeScr)}
+        </div>
+        ${finalScoreCenter(m)}
+        <div class="match-team away">
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.AwayScr)}
+        </div>
       </div>
     </div>
-  `).join("");
+  `);
 }
 
 // Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
@@ -1377,6 +1415,11 @@ wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 // to each card - tapping a card toggles its own lineup panel, rendering it
 // lazily from the already-loaded LineupsCache data (no fetch at click time).
 document.getElementById("fixtures-list").addEventListener("click", (e) => {
+  const header = e.target.closest(".comp-group-header");
+  if (header) {
+    toggleGroupCollapse(header.closest(".comp-group"), state.collapsedFixtureGroups);
+    return;
+  }
   const card = e.target.closest(".match-card");
   if (!card) return;
   const panel = card.querySelector(".lineup-panel");
@@ -1390,6 +1433,12 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
     card.dataset.homeName, card.dataset.awayName
   );
   panel.hidden = false;
+});
+
+document.getElementById("results-list").addEventListener("click", (e) => {
+  const header = e.target.closest(".comp-group-header");
+  if (!header) return;
+  toggleGroupCollapse(header.closest(".comp-group"), state.collapsedResultGroups);
 });
 
 // Both AI FPL actions run synchronously against a slow custom formula (the
