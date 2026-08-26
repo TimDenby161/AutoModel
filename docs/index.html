@@ -346,6 +346,33 @@
     width: 28px; font-weight: 700; padding-right: 0;
   }
   .standings-table td:nth-child(2) { overflow-wrap: break-word; }
+  .standings-table tbody tr { cursor: pointer; }
+  .standings-table tbody tr:active { background: var(--chip-bg); }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px; z-index: 100;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; max-width: 380px; width: 100%; max-height: 80vh; overflow-y: auto;
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-weight: 700; font-size: 15px; margin-bottom: 10px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .modal-close {
+    appearance: none; border: none; background: transparent; color: var(--text-muted);
+    font-size: 20px; line-height: 1; padding: 2px 6px; cursor: pointer; flex-shrink: 0;
+  }
+  .team-fixture-row { padding: 8px 0; }
+  .team-fixture-row + .team-fixture-row { border-top: 1px solid var(--border); }
+  .team-fixture-opponent { font-size: 13px; font-weight: 600; }
+  .team-fixture-venue { color: var(--text-muted); font-weight: 600; }
+  .team-fixture-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
   /* Player/Price/Mins stay pinned on the left while xPts/2GW/5GW/6GW/xG/xA/Def
      scroll underneath - compact padding+font so more of the scrolling half
      fits on screen at once too. */
@@ -592,6 +619,16 @@
   </section>
 
 </main>
+
+<div class="modal-overlay" id="team-fixtures-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <span id="team-fixtures-title"></span>
+      <button type="button" class="modal-close" id="team-fixtures-close" aria-label="Close">&times;</button>
+    </div>
+    <div id="team-fixtures-body"></div>
+  </div>
+</div>
 
 <script>
 // ---- Configuration ----------------------------------------------------
@@ -1539,6 +1576,7 @@ function renderFpl() {
 // PapaParse's dedup renames the current table's own "GF" to "GF_1".
 function clubRow(c) {
   return {
+    id: String(c["Club ID"] || "").trim(),
     name: c.Name || "",
     league: String(c.PrimaryLeague || ""),
     current: {
@@ -1654,7 +1692,7 @@ function renderTable() {
   let rows = state.club
     .map(clubRow)
     .filter((r) => !leagueIds || leagueIds.includes(r.league))
-    .map((r) => ({ name: r.name, stats: projected ? r.projected : r.current }));
+    .map((r) => ({ id: r.id, name: r.name, stats: projected ? r.projected : r.current }));
 
   rows.sort((a, b) =>
     (b.stats.pts - a.stats.pts) || (b.stats.gd - a.stats.gd) || (b.stats.gf - a.stats.gf)
@@ -1666,7 +1704,7 @@ function renderTable() {
   }
   const fmt = (n) => String(Math.round(n));
   body.innerHTML = rows.map((r, i) => `
-    <tr>
+    <tr data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
       <td>${escapeHtml(r.name)}</td>
       <td class="num">${fmt(r.stats.pl)}</td>
@@ -1680,6 +1718,57 @@ function renderTable() {
     </tr>
   `).join("");
 }
+
+// A club's next N upcoming fixtures across every competition it's in (not
+// just whichever league the Table tab is currently filtered to) - matches
+// on either Home or Away club ID (Matches!ID_1/ID_2).
+function teamNextFixtures(clubId, count) {
+  return state.fixtures
+    .filter((m) =>
+      (String(m.ID_1) === clubId || String(m.ID_2) === clubId) &&
+      toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date
+    )
+    .sort((a, b) => new Date(a.Date) - new Date(b.Date))
+    .slice(0, count);
+}
+
+function openTeamFixturesModal(clubId, clubName) {
+  document.getElementById("team-fixtures-title").textContent = clubName;
+  const body = document.getElementById("team-fixtures-body");
+  const fixtures = teamNextFixtures(clubId, 5);
+
+  body.innerHTML = fixtures.length
+    ? fixtures.map((m) => {
+        const isHome = String(m.ID_1) === clubId;
+        const opponent = isHome ? m.Away : m.Home;
+        return `
+          <div class="team-fixture-row">
+            <div class="team-fixture-opponent">${escapeHtml(opponent)} <span class="team-fixture-venue">(${isHome ? "H" : "A"})</span></div>
+            <div class="team-fixture-meta">${escapeHtml(m.League || "")} &middot; ${escapeHtml(formatKickoff(m.Date))}</div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="empty-state">No upcoming fixtures found.</div>`;
+
+  document.getElementById("team-fixtures-modal").hidden = false;
+}
+
+function closeTeamFixturesModal() {
+  document.getElementById("team-fixtures-modal").hidden = true;
+}
+
+document.getElementById("table-body").addEventListener("click", (e) => {
+  const row = e.target.closest("tr[data-club-id]");
+  if (!row || !row.dataset.clubId) return;
+  openTeamFixturesModal(row.dataset.clubId, row.dataset.clubName);
+});
+document.getElementById("team-fixtures-close").addEventListener("click", closeTeamFixturesModal);
+document.getElementById("team-fixtures-modal").addEventListener("click", (e) => {
+  if (e.target.id === "team-fixtures-modal") closeTeamFixturesModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTeamFixturesModal();
+});
 
 function renderAiPlayerRow(p) {
   return `
