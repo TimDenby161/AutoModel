@@ -560,7 +560,6 @@
 
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-dfX5uYVXzyU8+KHqj8bjo7UkOdg18PaOtpa48djpNbZHwExddghZ+ZmzWT06R5v6NSk3ZUfsH6FNEDepLx9hPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 // ---- Configuration ----------------------------------------------------
 // Fill these in after using Google Sheets' File > Share > Publish to web
@@ -568,20 +567,29 @@
 // "Entire Document"). Each looks like:
 //   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?gid=NNNN&single=true&output=csv
 const CONFIG = {
+  // Read via the Sheets API v4 (see fetchSheetValues) instead of the old
+  // "Publish to web" CSV export - that legacy pipeline had a roughly
+  // constant 15-22s latency floor per tab regardless of size (even a 7KB
+  // tab took ~18s), and would occasionally hang for minutes. The API key
+  // below is restricted (HTTP referrer + Sheets API only) in Google Cloud
+  // Console, so it's safe to ship in this public client-side file - that
+  // restriction is the actual security boundary, not secrecy of the key.
+  spreadsheetId: "1QhBOsdqzvxxLlXD8iJYwqGRaJIswU_6K86nLY88q5us",
+  sheetsApiKey: "AIzaSyAudlYOQClHk6gCA__o0WcaEFHKx6ouoyo",
   // Fixtures and Results are both driven from this one "Matches" tab -
   // it has the actual score (HomeS/AwayS), the ProjH/ProjA projection,
   // and the club-score rating (HomeScr/AwayScr) all in one place.
-  matchesTabCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1444085754&single=true&output=csv",
-  fplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=416026226&single=true&output=csv",
-  clubCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=801593454&single=true&output=csv",
+  matchesTabName: "Matches",
+  fplTabName: "FPL",
+  clubTabName: "Club",
   // LineupsCache: pre-computed by a scheduled Apps Script trigger (see
   // refreshAllLineups), not read live - the source XXXMins tabs are driven
   // by a custom EXPECTED_MINUTES() formula that takes 20-60+ seconds to
   // recalculate per club, far too slow for a click-to-expand UI.
-  lineupsCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=1415919920&single=true&output=csv",
+  lineupsTabName: "LineupsCache",
   // AIXI tab: repeating "GW{n} XI" blocks (own header row per block), not a
   // single flat table - see parseAiFplBlocks.
-  aiFplCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRI9ujyjRv0EU7xMaIUFVAZyC3g8HVULvI4Z4cy3o1XXzrkwUHtCrapJQ0wU-UoMcMeO7QZlgQKBnIs/pub?gid=932437441&single=true&output=csv",
+  aiFplTabName: "AIXI",
   // Apps Script Web App /exec URL, for the Update Transfers / Confirm
   // Transfers buttons on the AI FPL tab - set once that's deployed (see
   // doGet's action= dispatch).
@@ -639,76 +647,86 @@ function setStatus(text) {
 
 function showConfigWarning(container) {
   container.innerHTML = `<div class="config-warning">
-    This dashboard needs its data source URLs set. Open <code>docs/index.html</code>
-    in the repo, fill in <code>CONFIG.matchesTabCsvUrl</code>,
-    <code>CONFIG.fplCsvUrl</code>, and <code>CONFIG.clubCsvUrl</code>
-    with the links from Google Sheets'
-    <strong>File &gt; Share &gt; Publish to web</strong> (CSV format, one specific sheet
-    at a time), then commit.
+    This dashboard needs its Sheets API access set. Open <code>docs/index.html</code>
+    in the repo and fill in <code>CONFIG.spreadsheetId</code> and
+    <code>CONFIG.sheetsApiKey</code> (a Google Cloud API key restricted to the
+    Sheets API and this site's HTTP referrer), then commit.
   </div>`;
 }
 
-function parseCsv(url) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => resolve(results.data),
-      error: reject,
-    });
+// Fetches one tab's full contents as a raw array-of-arrays via the Sheets
+// API v4 - see the CONFIG comment for why this replaced the old "Publish to
+// web" CSV export (that pipeline had a ~15-22s floor per tab regardless of
+// size, and would occasionally hang for minutes; this is typically under a
+// second). FORMATTED_VALUE matches what the CSV export used to hand back
+// (e.g. dates as the same ISO strings already used elsewhere, not raw
+// Sheets serial numbers), so none of the downstream parsing needed to change.
+async function fetchSheetValues(sheetName) {
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.spreadsheetId}/values/` +
+    `${encodeURIComponent(sheetName)}?key=${CONFIG.sheetsApiKey}&valueRenderOption=FORMATTED_VALUE`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Sheets API "${sheetName}" failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.values || [];
+}
+
+// Mirrors what the old PapaParse-based parseCsv/parseCsvWithHeaderRow calls
+// relied on: drop rows that are entirely blank across every column (their
+// skipEmptyLines:true), then build header->value objects from the row at
+// headerRowIndex (0 for most tabs; FPL's real column headers sit one row
+// below a merged group-label row - e.g. "xPts" spans several columns whose
+// own headers are just "1".."5" - so FPL is called with 1). Repeated header
+// names are de-duplicated the same way PapaParse's header:true does: the
+// first occurrence keeps its bare name, later ones get _1, _2, ... (e.g.
+// Matches' three "ID" columns become ID/ID_1/ID_2, used for the
+// competition/home-club/away-club IDs respectively).
+function sheetRowsToObjects(values, headerRowIndex = 0) {
+  const rows = sheetRowsRaw(values);
+  if (rows.length <= headerRowIndex) return [];
+  const seen = new Map();
+  const keys = rows[headerRowIndex].map((h, i) => {
+    let key = (h || "").trim() || `col${i}`;
+    if (seen.has(key)) {
+      const count = seen.get(key) + 1;
+      seen.set(key, count);
+      key = `${key}_${count}`;
+    } else {
+      seen.set(key, 0);
+    }
+    return key;
+  });
+  return rows.slice(headerRowIndex + 1).map((row) => {
+    const obj = {};
+    keys.forEach((k, i) => { obj[k] = row[i]; });
+    return obj;
   });
 }
 
-// The FPL tab has a merged group-label row above its real header row (e.g.
-// "xPts" spans columns P-Y, whose actual headers are just "1".."10") - a
-// plain header:true parse would treat that group-label row as the headers
-// instead. Parse without a header, then build objects from row index
-// `headerRow` ourselves, keeping the first occurrence of a repeated name
-// (e.g. the "1".."10" block appears nine times) as the plain key and only
-// suffixing later duplicates, so p["1"]/p.Pos etc. hit the intended column.
-function parseCsvWithHeaderRow(url, headerRow) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
-      header: false,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = results.data;
-        const seen = new Map();
-        const keys = rows[headerRow].map((h, i) => {
-          let key = (h || "").trim() || `col${i}`;
-          if (seen.has(key)) {
-            const count = seen.get(key) + 1;
-            seen.set(key, count);
-            key = `${key}_${count}`;
-          } else {
-            seen.set(key, 0);
-          }
-          return key;
-        });
-        resolve(
-          rows.slice(headerRow + 1).map((row) => {
-            const obj = {};
-            keys.forEach((k, i) => { obj[k] = row[i]; });
-            return obj;
-          })
-        );
-      },
-      error: reject,
-    });
-  });
+// Raw-array equivalent of the old parseCsvRaw - just the skipEmptyLines
+// filtering, no header/object conversion (AIXI's repeating GW-block layout
+// parses itself from row indices - see parseAiFplBlocks).
+function sheetRowsRaw(values) {
+  return (values || []).filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""));
 }
 
-function parseCsvRaw(url) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
-      header: false,
-      skipEmptyLines: true,
-      complete: (results) => resolve(results.data),
-      error: reject,
-    });
+// FPL's "xPts" group's first sub-column is a moving target - its header
+// reads "1" only at the very start of a season, then "2", "3"... as
+// gameweeks pass (the same dynamic window AIXI's own readFplPlayers_
+// already accounts for on the Apps Script side). Attaches each row's real
+// next-gameweek xPts value as .xptsNext by column POSITION - found via the
+// merged "xPts" label in the group-header row above the real headers -
+// rather than by a name that stops matching once GW1 is over.
+function attachFplXptsNext(fplRows, values) {
+  const groupRow = (values[0] || []).map((h) => String(h || "").trim().toLowerCase());
+  const xptsCol = groupRow.indexOf("xpts");
+  if (xptsCol < 0) return;
+  const dataRows = sheetRowsRaw(values).slice(2); // past the group-label row and the real header row
+  fplRows.forEach((row, i) => {
+    row.xptsNext = dataRows[i] ? dataRows[i][xptsCol] : "";
   });
 }
 
@@ -818,7 +836,7 @@ function parseAiFplCurrentSquad(rows) {
       pos,
       player,
       club: (row[2] || "").trim(),
-      price: toNum(row[3]),
+      price: toMoney(row[3]), // cell reads "£6.0" - toNum's plain parseFloat chokes on the currency symbol
       xpts: toNum(row[5]), // first of the GW columns - next-gameweek projected points
     });
   }
@@ -828,6 +846,13 @@ function parseAiFplCurrentSquad(rows) {
 function toNum(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+// Like toNum, but strips a leading currency symbol first (e.g. AIXI's Price
+// column reads "£6.0" as FORMATTED_VALUE text - plain parseFloat can't
+// start a match on a non-numeric character, so it'd otherwise read as 0).
+function toMoney(v) {
+  return toNum(String(v ?? "").replace(/[^0-9.-]/g, ""));
 }
 
 function escapeHtml(s) {
@@ -1098,7 +1123,7 @@ function fplRow(p) {
     pos,
     price: toNum(p.Price),
     mins: toNum(p.ExpMins),
-    xpts: toNum(p["1"]),
+    xpts: toNum(p.xptsNext),
     gw2: toNum(p["2GW"]),
     gw5: toNum(p["5GW"]),
     gw6: toNum(p["6GW"]),
@@ -1178,7 +1203,7 @@ function clubCodeByClubId() {
 }
 
 // Club short code -> { position: {name, mins, age, ability} }, from the
-// pre-computed LineupsCache tab (see CONFIG.lineupsCsvUrl).
+// pre-computed LineupsCache tab (see CONFIG.lineupsTabName).
 function buildLineupsByClub(rows) {
   const map = {};
   rows.forEach((r) => {
@@ -1399,7 +1424,7 @@ function showLoadErrorRow(tbody, colspan, label) {
 }
 
 async function loadData() {
-  if (!CONFIG.matchesTabCsvUrl || !CONFIG.fplCsvUrl || !CONFIG.clubCsvUrl) {
+  if (!CONFIG.spreadsheetId || !CONFIG.sheetsApiKey) {
     showConfigWarning(document.getElementById("fixtures-list"));
     showConfigWarning(document.getElementById("results-list"));
     document.getElementById("fpl-body").innerHTML = "";
@@ -1412,7 +1437,7 @@ async function loadData() {
   setStatus("Loading…");
 
   const tasks = [
-    fetchWithRetry(() => parseCsv(CONFIG.matchesTabCsvUrl), "Matches")
+    fetchWithRetry(() => fetchSheetValues(CONFIG.matchesTabName).then((v) => sheetRowsToObjects(v)), "Matches")
       .then((fixtures) => {
         state.fixtures = fixtures;
         renderFixtures();
@@ -1424,8 +1449,10 @@ async function loadData() {
         showLoadErrorCard(document.getElementById("results-list"), "results");
         throw err;
       }),
-    fetchWithRetry(() => parseCsvWithHeaderRow(CONFIG.fplCsvUrl, 1), "FPL")
-      .then((fpl) => {
+    fetchWithRetry(() => fetchSheetValues(CONFIG.fplTabName), "FPL")
+      .then((values) => {
+        const fpl = sheetRowsToObjects(values, 1);
+        attachFplXptsNext(fpl, values);
         state.fpl = fpl;
         renderFpl();
       })
@@ -1434,7 +1461,7 @@ async function loadData() {
         showLoadErrorRow(document.getElementById("fpl-body"), 10, "FPL data");
         throw err;
       }),
-    fetchWithRetry(() => parseCsv(CONFIG.clubCsvUrl), "Club")
+    fetchWithRetry(() => fetchSheetValues(CONFIG.clubTabName).then((v) => sheetRowsToObjects(v)), "Club")
       .then((club) => {
         state.club = club;
         renderTable();
@@ -1447,12 +1474,12 @@ async function loadData() {
     // No dedicated tab/error UI for this one - it only powers the
     // click-to-expand lineup on Fixtures. A failure here just means that
     // panel shows "Lineup not available" instead of blocking anything.
-    fetchWithRetry(() => parseCsv(CONFIG.lineupsCsvUrl), "Lineups")
+    fetchWithRetry(() => fetchSheetValues(CONFIG.lineupsTabName).then((v) => sheetRowsToObjects(v)), "Lineups")
       .then((lineups) => {
         state.lineupsByClub = buildLineupsByClub(lineups);
       })
       .catch((err) => console.error(err)),
-    fetchWithRetry(() => parseCsvRaw(CONFIG.aiFplCsvUrl), "AI FPL")
+    fetchWithRetry(() => fetchSheetValues(CONFIG.aiFplTabName).then((v) => sheetRowsRaw(v)), "AI FPL")
       .then((rows) => {
         state.aiFpl = parseAiFplBlocks(rows);
         state.aiFplTransfers = parseAiFplTransfers(rows);
