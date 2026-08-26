@@ -195,7 +195,13 @@
     display: inline-block; font-size: 10px; width: 10px;
     color: var(--text-muted); flex-shrink: 0;
   }
-  .comp-group-name { flex: 1; min-width: 0; }
+  .comp-group-name {
+    appearance: none; border: none; background: transparent; padding: 0;
+    flex: 1; min-width: 0; text-align: left;
+    font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+    cursor: pointer;
+  }
+  .comp-group-name:hover, .comp-group-name:focus-visible { text-decoration: underline; }
   .comp-group-count {
     color: var(--text-muted); font-weight: 600;
     font-variant-numeric: tabular-nums;
@@ -455,27 +461,8 @@
 <main>
   <section class="panel" data-tab="fixtures" data-active="true">
     <div class="filters-wrap" id="fixture-filters">
-      <div class="filter-row">
-        <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
-        <button type="button" class="filter-chip" data-filter="pl" aria-pressed="false">Prem</button>
-        <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
-        <button type="button" class="filter-chip" data-filter="l1" aria-pressed="false">League One</button>
-        <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
-        <button type="button" class="filter-chip" data-filter="nl" aria-pressed="false">National League</button>
-        <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
-        <button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>
-      </div>
-      <div class="filter-row filter-row-more" hidden>
-        <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
-        <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">La Liga</button>
-        <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
-        <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
-        <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
-        <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi</button>
-        <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
-        <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
-        <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
-      </div>
+      <div class="filter-row"></div>
+      <div class="filter-row filter-row-more" hidden></div>
     </div>
     <div class="secondary-filters">
       <div class="date-filter-group">
@@ -491,27 +478,8 @@
 
   <section class="panel" data-tab="results">
     <div class="filters-wrap" id="result-filters">
-      <div class="filter-row">
-        <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
-        <button type="button" class="filter-chip" data-filter="pl" aria-pressed="false">Prem</button>
-        <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
-        <button type="button" class="filter-chip" data-filter="l1" aria-pressed="false">League One</button>
-        <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
-        <button type="button" class="filter-chip" data-filter="nl" aria-pressed="false">National League</button>
-        <button type="button" class="filter-chip" data-filter="eng" aria-pressed="false">English Teams</button>
-        <button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>
-      </div>
-      <div class="filter-row filter-row-more" hidden>
-        <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
-        <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">La Liga</button>
-        <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
-        <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
-        <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
-        <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi</button>
-        <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
-        <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
-        <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
-      </div>
+      <div class="filter-row"></div>
+      <div class="filter-row filter-row-more" hidden></div>
     </div>
     <div class="secondary-filters">
       <div class="date-filter-group">
@@ -646,6 +614,12 @@ const CONFIG = {
 };
 // -------------------------------------------------------------------
 
+// Set once the first successful data load has applied Fixtures/Results'
+// default date/round view (today's fixtures, most recent day's results) -
+// a manual Refresh afterward must not silently reset whatever filter/date/
+// round the user has since chosen.
+let initialDefaultsApplied = false;
+
 const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
   fplSortKey: "xpts", fplSortDir: -1,
@@ -695,6 +669,45 @@ const LEAGUE_FILTERS = {
   ecl: ["10216"],
   eng: ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"],
 };
+
+// Used only by Fixtures/Results (see buildCompetitionList/competitionIdsFor)
+// - Table keeps its own static LEAGUE_FILTERS chips above, unchanged.
+//
+// The raw "League" text on a match isn't a clean 1:1 competition key - some
+// competitions split into many sub-labels for what's really one thing (EFL
+// Trophy shows as 16 separate group labels like "EFL Trophy Northern Grp.
+// A".."H", AFC Champions League Two/Elite similarly split into groups/
+// conferences). Fixtures/Results filter and group by Competition ID
+// instead, with a curated short label here for anything whose raw League
+// text would be fragmented or unwieldy. A competition ID not listed here
+// just falls back to its own (single, clean) League text automatically -
+// see buildCompetitionList.
+const COMPETITION_LABELS = {
+  "47": "Prem",
+  "48": "Championship",
+  "108": "League One",
+  "109": "League Two",
+  "117": "National League",
+  "8944": "Nat. League N/S",
+  "9084": "PL2",
+  "536": "Saudi Pro League",
+  "71": "Süper Lig",
+  "54": "Bundesliga",
+  "53": "Ligue 1",
+  "87": "La Liga",
+  "55": "Serie A",
+  "42": "Champions League",
+  "133": "EFL Cup",
+  "142": "EFL Trophy",
+  "525": "AFC Champions League Elite",
+  "9469": "AFC Champions League Two",
+  "45": "Copa Libertadores",
+  "299": "Copa Sudamericana",
+};
+
+// Same English-competition set as LEAGUE_FILTERS.eng above, reused for the
+// Fixtures/Results "English Teams" chip.
+const ENGLISH_COMPETITION_IDS = ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"];
 
 function setStatus(text) {
   document.getElementById("status-line").textContent = text;
@@ -1031,26 +1044,169 @@ function parseLocalDateInput(value) {
   return new Date(y, m - 1, d);
 }
 
+// Fixtures/Results filter chips are generated from whichever competitions
+// are actually in the data, keyed by Competition ID (not the raw "League"
+// text - see COMPETITION_LABELS), most active first.
+function buildCompetitionList() {
+  const counts = new Map();
+  state.fixtures.forEach((m) => {
+    const id = String(m.ID || "").trim();
+    if (!id) return;
+    if (!counts.has(id)) counts.set(id, { id, autoLabel: m.League || id, count: 0 });
+    counts.get(id).count++;
+  });
+  const list = [...counts.values()].map((c) => ({
+    id: c.id,
+    label: COMPETITION_LABELS[c.id] || c.autoLabel,
+    count: c.count,
+  }));
+  list.sort((a, b) => b.count - a.count);
+  return list;
+}
+
+// "all" -> no filter, "eng" -> the fixed English-competition set, anything
+// else -> that one specific Competition ID.
+function competitionIdsFor(filterValue) {
+  if (filterValue === "all") return null;
+  if (filterValue === "eng") return ENGLISH_COMPETITION_IDS;
+  return [filterValue];
+}
+
+// Whether a filter value represents exactly one real competition - "all"
+// and "eng" are aggregates spanning many competitions with unrelated round
+// numbering, so round-based browsing doesn't apply to them.
+function isSingleCompetitionFilter(filterValue) {
+  return filterValue !== "all" && filterValue !== "eng";
+}
+
+function dateStrOf(dateValue) {
+  const d = new Date(dateValue);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function todayDateStr() {
+  return dateStrOf(new Date());
+}
+
+// The most recent day with at least one finished match, across whatever
+// competitions are in scope - Results' "All"/"English Teams" default.
+function mostRecentResultDateStr() {
+  const finished = state.fixtures.filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date);
+  if (!finished.length) return "";
+  const latest = finished.reduce((max, m) => (new Date(m.Date) > new Date(max.Date) ? m : max));
+  return dateStrOf(latest.Date);
+}
+
+// The round of the soonest upcoming match (Fixtures) / most recent finished
+// match (Results) for a single competition - "next round"/"last round".
+function defaultRoundFor(prefix, filterValue) {
+  const ids = competitionIdsFor(filterValue);
+  if (!ids) return "";
+  const isFixtures = prefix === "fixture";
+  const relevant = state.fixtures.filter((m) =>
+    ids.includes(String(m.ID)) &&
+    toNum(m.Cancelled) === 0 &&
+    m.Date &&
+    (isFixtures ? toNum(m.Started) === 0 : toNum(m.Finished) === 1)
+  );
+  if (!relevant.length) return "";
+  relevant.sort((a, b) =>
+    isFixtures ? new Date(a.Date) - new Date(b.Date) : new Date(b.Date) - new Date(a.Date)
+  );
+  return String(relevant[0].Round || "").trim();
+}
+
+// Sets the date/round filters to this filter's default view: "All"/
+// "English Teams" browse by date (today for Fixtures, most recent match day
+// for Results); one specific competition browses by round instead (next
+// round for Fixtures, last round for Results).
+function applyDefaultDateAndRound(prefix) {
+  const filterValue = state[`${prefix}Filter`];
+  const dateInput = document.getElementById(`${prefix}-date-filter`);
+  const dateClear = document.getElementById(`${prefix}-date-clear`);
+
+  if (isSingleCompetitionFilter(filterValue)) {
+    state[`${prefix}DateFilter`] = "";
+    state[`${prefix}RoundFilter`] = defaultRoundFor(prefix, filterValue);
+  } else {
+    state[`${prefix}DateFilter`] = prefix === "fixture" ? todayDateStr() : mostRecentResultDateStr();
+    state[`${prefix}RoundFilter`] = "";
+  }
+  dateInput.value = state[`${prefix}DateFilter`];
+  dateClear.hidden = !state[`${prefix}DateFilter`];
+}
+
+// (Re)builds the league filter chips for a Fixtures/Results panel from
+// buildCompetitionList - "All" and "English Teams" are always pinned first,
+// then real competitions most-active-first, split across the visible row
+// and the "More" row the same way the old static markup did.
+function renderLeagueFilterChips(prefix) {
+  const wrap = document.getElementById(`${prefix}-filters`);
+  const mainRow = wrap.querySelector(".filter-row");
+  const moreRow = wrap.querySelector(".filter-row-more");
+  const currentFilter = state[`${prefix}Filter`];
+  const competitions = buildCompetitionList();
+
+  const chip = (id, label) =>
+    `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-pressed="${currentFilter === id}">${escapeHtml(label)}</button>`;
+
+  const pinned = [chip("all", "All"), chip("eng", "English Teams")];
+  const visibleCount = 5;
+  const primary = competitions.slice(0, visibleCount).map((c) => chip(c.id, c.label));
+  const rest = competitions.slice(visibleCount).map((c) => chip(c.id, c.label));
+
+  mainRow.innerHTML =
+    pinned.join("") +
+    primary.join("") +
+    `<button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>`;
+  moreRow.innerHTML = rest.join("");
+  moreRow.hidden = true;
+  wireMoreToggle(wrap);
+}
+
+// Applies a league selection and its default date/round view - used by both
+// the filter chips and clicking a competition's name in a group header (see
+// renderGroupedMatches).
+function selectLeagueFilter(prefix, filterValue) {
+  const wrap = document.getElementById(`${prefix}-filters`);
+  wrap.querySelectorAll(".filter-chip[data-filter]").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.filter === filterValue))
+  );
+  const targetChip = wrap.querySelector(`.filter-chip[data-filter="${CSS.escape(filterValue)}"]`);
+  if (targetChip && targetChip.closest(".filter-row-more")) {
+    const moreRow = wrap.querySelector(".filter-row-more");
+    const toggle = wrap.querySelector("[data-more-toggle]");
+    moreRow.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.innerHTML = "Less &#9652;";
+  }
+
+  state[`${prefix}Filter`] = filterValue;
+  applyDefaultDateAndRound(prefix);
+  populateRoundFilter(prefix);
+  (prefix === "fixture" ? renderFixtures : renderResults)();
+}
+
 // Rebuilds the Round <select> for a Fixtures/Results panel from whichever
-// rounds are actually present for the currently selected league - round
-// numbers aren't comparable across competitions, so this is disabled
-// entirely on "All". Call whenever the league filter changes or fresh data
-// loads, since both can change which rounds are available.
+// rounds are actually present for the currently selected competition -
+// round numbers aren't comparable across competitions, so this is disabled
+// for "All"/"English Teams". Call whenever the league filter changes or
+// fresh data loads, since both can change which rounds are available.
 function populateRoundFilter(prefix) {
   const select = document.getElementById(`${prefix}-round-filter`);
-  const leagueFilter = state[`${prefix}Filter`];
-  const leagueIds = LEAGUE_FILTERS[leagueFilter];
+  const filterValue = state[`${prefix}Filter`];
   const isFixtures = prefix === "fixture";
 
-  if (!leagueIds) {
+  if (!isSingleCompetitionFilter(filterValue)) {
     select.innerHTML = `<option value="">Select a league for rounds</option>`;
     select.disabled = true;
     state[`${prefix}RoundFilter`] = "";
     return;
   }
 
+  const ids = competitionIdsFor(filterValue);
   const relevant = state.fixtures.filter((m) =>
-    leagueIds.includes(String(m.ID)) &&
+    ids.includes(String(m.ID)) &&
     toNum(m.Cancelled) === 0 &&
     (isFixtures ? toNum(m.Started) === 0 : toNum(m.Finished) === 1)
   );
@@ -1075,35 +1231,40 @@ function populateRoundFilter(prefix) {
   }
 }
 
-// Groups an already-sorted match list by competition, preserving each
-// group's position from wherever its first match falls in that order - so
-// fixtures group with the soonest-kicking-off competition first, and
-// results group with the most-recently-finished competition first.
+// Groups an already-sorted match list by Competition ID (not the raw
+// "League" text - see COMPETITION_LABELS), preserving each group's position
+// from wherever its first match falls in that order - so fixtures group
+// with the soonest-kicking-off competition first, and results group with
+// the most-recently-finished competition first.
 function groupByCompetition(matches) {
   const order = [];
   const groups = {};
   matches.forEach((m) => {
-    const league = m.League || "Other";
-    if (!groups[league]) {
-      groups[league] = [];
-      order.push(league);
+    const id = String(m.ID || "").trim() || "other";
+    if (!groups[id]) {
+      groups[id] = { id, label: COMPETITION_LABELS[id] || m.League || "Other", matches: [] };
+      order.push(id);
     }
-    groups[league].push(m);
+    groups[id].matches.push(m);
   });
-  return order.map((league) => ({ league, matches: groups[league] }));
+  return order.map((id) => groups[id]);
 }
 
 // Shared by renderFixtures/renderResults - wraps each competition's cards in
 // a collapsible group. collapsedSet is whichever of state.collapsedFixture/
 // ResultGroups applies, so a group's open/closed state survives re-renders.
+// The competition name is its own clickable target (data-jump-league) that
+// switches the filter to just that competition, defaulting to its next/last
+// round - separate from the caret/count, which just toggle the collapse
+// (see the click handlers on #fixtures-list/#results-list).
 function renderGroupedMatches(groups, collapsedSet, cardHtmlFn) {
   return groups.map((g) => {
-    const collapsed = collapsedSet.has(g.league);
+    const collapsed = collapsedSet.has(g.id);
     return `
-      <div class="comp-group${collapsed ? " collapsed" : ""}" data-league="${escapeHtml(g.league)}">
+      <div class="comp-group${collapsed ? " collapsed" : ""}" data-comp-id="${escapeHtml(g.id)}">
         <div class="comp-group-header">
           <span class="comp-group-caret">${collapsed ? "&#9656;" : "&#9662;"}</span>
-          <span class="comp-group-name">${escapeHtml(g.league)}</span>
+          <button type="button" class="comp-group-name" data-jump-league="${escapeHtml(g.id)}">${escapeHtml(g.label)}</button>
           <span class="comp-group-count">${g.matches.length}</span>
         </div>
         <div class="card-list">${g.matches.map(cardHtmlFn).join("")}</div>
@@ -1114,12 +1275,12 @@ function renderGroupedMatches(groups, collapsedSet, cardHtmlFn) {
 
 function toggleGroupCollapse(groupEl, collapsedSet) {
   if (!groupEl) return;
-  const league = groupEl.dataset.league;
-  const collapsed = collapsedSet.has(league);
+  const id = groupEl.dataset.compId;
+  const collapsed = collapsedSet.has(id);
   if (collapsed) {
-    collapsedSet.delete(league);
+    collapsedSet.delete(id);
   } else {
-    collapsedSet.add(league);
+    collapsedSet.add(id);
   }
   groupEl.classList.toggle("collapsed", !collapsed);
   const caret = groupEl.querySelector(".comp-group-caret");
@@ -1129,7 +1290,7 @@ function toggleGroupCollapse(groupEl, collapsedSet) {
 function renderFixtures() {
   const container = document.getElementById("fixtures-list");
   const today = new Date();
-  const leagueIds = LEAGUE_FILTERS[state.fixtureFilter];
+  const leagueIds = competitionIdsFor(state.fixtureFilter);
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const dateFilter = parseLocalDateInput(state.fixtureDateFilter);
   const roundFilter = state.fixtureRoundFilter;
@@ -1217,7 +1378,7 @@ function finalScoreCenter(m) {
 
 function renderResults() {
   const container = document.getElementById("results-list");
-  const leagueIds = LEAGUE_FILTERS[state.resultFilter];
+  const leagueIds = competitionIdsFor(state.resultFilter);
   const dateFilter = parseLocalDateInput(state.resultDateFilter);
   const roundFilter = state.resultRoundFilter;
   const matching = state.fixtures
@@ -1596,6 +1757,13 @@ async function loadData() {
     fetchWithRetry(() => fetchSheetValues(CONFIG.matchesTabName).then((v) => sheetRowsToObjects(v)), "Matches")
       .then((fixtures) => {
         state.fixtures = fixtures;
+        renderLeagueFilterChips("fixture");
+        renderLeagueFilterChips("result");
+        if (!initialDefaultsApplied) {
+          initialDefaultsApplied = true;
+          applyDefaultDateAndRound("fixture");
+          applyDefaultDateAndRound("result");
+        }
         populateRoundFilter("fixture");
         populateRoundFilter("result");
         renderFixtures();
@@ -1680,28 +1848,22 @@ function wireMoreToggle(wrap) {
     toggle.innerHTML = expanded ? "More &#9662;" : "Less &#9652;";
   });
 }
-wireMoreToggle(document.getElementById("fixture-filters"));
-wireMoreToggle(document.getElementById("result-filters"));
 wireMoreToggle(document.getElementById("table-filters"));
 
-document.querySelectorAll("#fixture-filters .filter-chip[data-filter]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#fixture-filters .filter-chip[data-filter]").forEach((b) => b.setAttribute("aria-pressed", "false"));
-    btn.setAttribute("aria-pressed", "true");
-    state.fixtureFilter = btn.dataset.filter;
-    populateRoundFilter("fixture");
-    renderFixtures();
-  });
+// Fixtures/Results league chips are generated dynamically from whatever
+// competitions are actually in the data (see renderLeagueFilterChips)
+// rather than a fixed list, so click-handling is delegated on the wrap
+// container instead of bound per-button - that keeps working regardless of
+// how many times the chip HTML gets regenerated.
+document.getElementById("fixture-filters").addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-chip[data-filter]");
+  if (!btn) return;
+  selectLeagueFilter("fixture", btn.dataset.filter);
 });
-
-document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((b) => b.setAttribute("aria-pressed", "false"));
-    btn.setAttribute("aria-pressed", "true");
-    state.resultFilter = btn.dataset.filter;
-    populateRoundFilter("result");
-    renderResults();
-  });
+document.getElementById("result-filters").addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-chip[data-filter]");
+  if (!btn) return;
+  selectLeagueFilter("result", btn.dataset.filter);
 });
 
 function wireDateRoundFilters(prefix, renderFn) {
@@ -1773,6 +1935,11 @@ wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 // to each card - tapping a card toggles its own lineup panel, rendering it
 // lazily from the already-loaded LineupsCache data (no fetch at click time).
 document.getElementById("fixtures-list").addEventListener("click", (e) => {
+  const jumpBtn = e.target.closest("[data-jump-league]");
+  if (jumpBtn) {
+    selectLeagueFilter("fixture", jumpBtn.dataset.jumpLeague);
+    return;
+  }
   const header = e.target.closest(".comp-group-header");
   if (header) {
     toggleGroupCollapse(header.closest(".comp-group"), state.collapsedFixtureGroups);
@@ -1794,6 +1961,11 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
 });
 
 document.getElementById("results-list").addEventListener("click", (e) => {
+  const jumpBtn = e.target.closest("[data-jump-league]");
+  if (jumpBtn) {
+    selectLeagueFilter("result", jumpBtn.dataset.jumpLeague);
+    return;
+  }
   const header = e.target.closest(".comp-group-header");
   if (!header) return;
   toggleGroupCollapse(header.closest(".comp-group"), state.collapsedResultGroups);
