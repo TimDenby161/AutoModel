@@ -924,14 +924,12 @@ function matchScoreCenter(m) {
 // probabilities) - PapaParse dedupes the repeated headers by suffixing
 // the second set with "_1". Only render once there's a real projection;
 // the model rows without one carry a placeholder 0/1/0 (guaranteed draw).
-function matchProbsRow(m) {
-  const projH = parseFloat(m.ProjH);
-  const projA = parseFloat(m.ProjA);
+// Shared by matchProbsRow (Fixtures - live, ever-updating projection) and
+// matchProbsRowSnapshot (Results - frozen at whatever was projected before
+// kickoff, since HomeScr/AwayScr and everything derived from them are
+// TODAY()-dependent formulas that keep drifting after a match is finished).
+function renderProbBar(projH, projA, hw, draw, aw) {
   if (!Number.isFinite(projH) || !Number.isFinite(projA)) return "";
-
-  const hw = parseFloat(m.HW_1);
-  const draw = parseFloat(m.D_1);
-  const aw = parseFloat(m.AW_1);
   if (![hw, draw, aw].every(Number.isFinite)) return "";
 
   const pctHw = Math.round(hw * 100);
@@ -953,6 +951,21 @@ function matchProbsRow(m) {
       </div>
     </div>
   `;
+}
+
+function matchProbsRow(m) {
+  return renderProbBar(
+    parseFloat(m.ProjH), parseFloat(m.ProjA),
+    parseFloat(m.HW_1), parseFloat(m.D_1), parseFloat(m.AW_1)
+  );
+}
+
+// Results uses the frozen pre-kickoff snapshot instead of the live figures.
+function matchProbsRowSnapshot(m) {
+  return renderProbBar(
+    parseFloat(m.SnapProjH), parseFloat(m.SnapProjA),
+    parseFloat(m.SnapHomeWinPct), parseFloat(m.SnapDrawPct), parseFloat(m.SnapAwayWinPct)
+  );
 }
 
 // Always show the next N upcoming fixtures for whichever filter is active,
@@ -1075,17 +1088,19 @@ function projScoreSub(raw) {
   return `<div class="match-score-sub">${n.toFixed(1)}</div>`;
 }
 
+// Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
+// SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot.
 function finalScoreCenter(m) {
   return `
     <div class="match-score has-proj">
       <div class="score-col">
         <span class="proj-box">${escapeHtml(m.HomeS)}</span>
-        ${projScoreSub(m.ProjH)}
+        ${projScoreSub(m.SnapProjH)}
       </div>
       <span class="vs-text">&ndash;</span>
       <div class="score-col">
         <span class="proj-box">${escapeHtml(m.AwayS)}</span>
-        ${projScoreSub(m.ProjA)}
+        ${projScoreSub(m.SnapProjA)}
       </div>
     </div>
   `;
@@ -1114,14 +1129,15 @@ function renderResults() {
       <div class="match-teams">
         <div class="match-team">
           ${escapeHtml(m.Home)}
-          ${clubScoreLabel(m.HomeScr)}
+          ${clubScoreLabel(m.SnapHomeScr)}
         </div>
         ${finalScoreCenter(m)}
         <div class="match-team away">
           ${escapeHtml(m.Away)}
-          ${clubScoreLabel(m.AwayScr)}
+          ${clubScoreLabel(m.SnapAwayScr)}
         </div>
       </div>
+      ${matchProbsRowSnapshot(m)}
     </div>
   `);
 }

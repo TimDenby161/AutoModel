@@ -114,7 +114,7 @@ CLUB_LAST_FORMULA_COLUMN = "CP"  # every column B..CP looks up ClubData by ID
 MATCHES_WORKSHEET = "Matches"
 MATCHES_HEADER_ROW = 1
 MATCHES_DATA_START_ROW = 2
-MATCHES_LAST_FORMULA_COLUMN = "Q"  # every column B..Q looks up MatchData by ID
+MATCHES_LAST_FORMULA_COLUMN = "AX"  # every column B..AX looks up/derives from MatchData by ID
 
 INDIVIDUAL_RESULTS_SPREADSHEET_ID = "1y2L7pOfIHqBMQCYsMy3g1Cm1iHCl3aR6onIpMWzWa1A"
 INDIVIDUAL_RESULTS_WORKSHEET = "Individual Results"
@@ -296,6 +296,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-matches-tab",
         action="store_true",
         help="Don't mirror IDs/formulas into the Matches tab after syncing MatchData",
+    )
+    parser.add_argument(
+        "--skip-projection-snapshot",
+        action="store_true",
+        help="Don't freeze not-yet-started matches' ProjH/ProjA/HomeScr/AwayScr and win/draw/away win%% into MatchData's Snap* columns",
     )
     parser.add_argument(
         "--individual-results-spreadsheet-id",
@@ -1200,6 +1205,106 @@ def write_errors(path: Path, errors: list[tuple[str, str]]) -> None:
         writer.writerows(errors)
 
 
+SNAPSHOT_HEADERS = [
+    "SnapProjH", "SnapProjA", "SnapHomeScr", "SnapAwayScr",
+    "SnapHomeWinPct", "SnapDrawPct", "SnapAwayWinPct",
+]
+# Column indices (0-based) into the Matches tab's A:AQ layout for the live
+# values these snapshot columns freeze. ProjH/ProjA and the win/draw/away
+# probabilities both derive from HomeScr/AwayScr, which depend on TODAY() -
+# see snapshot_pre_match_projections for why that means they drift forever
+# unless captured before kickoff.
+MATCHES_STARTED_COL = 2
+MATCHES_SNAPSHOT_SOURCE_COLS = [19, 20, 21, 24, 40, 41, 42]  # ProjH, ProjA, HomeScr, AwayScr, HW%, D%, AW%
+
+
+def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> None:
+    """Freezes each not-yet-started match's current ProjH/ProjA/HomeScr/
+    AwayScr and Home/Draw/Away win% into extra MatchData columns, sitting
+    past gmatch.HEADERS's own columns so sync_matches's normal row
+    updates/appends (which only ever touch A:{len(gmatch.HEADERS)}) never
+    overwrite them. Captured fresh every run while Started=0 (so it's always
+    the latest pre-match prediction, informed by late team news), then left
+    untouched forever the moment a match kicks off - without this, a
+    finished match's "projection" is just whatever today's club ratings
+    would predict, not what was actually predicted beforehand, since
+    HomeScr/AwayScr (and everything derived from them) are literally
+    formulas built on TODAY().
+    """
+    match_worksheet = spreadsheet.worksheet(args.match_worksheet)
+    matches_worksheet = spreadsheet.worksheet(MATCHES_WORKSHEET)
+
+    header_len = len(gmatch.HEADERS)
+    snap_start_col = header_len + 1
+    snap_end_col = header_len + len(SNAPSHOT_HEADERS)
+    snap_start_letter = column_letters(snap_start_col)
+    snap_end_letter = column_letters(snap_end_col)
+
+    # MatchData's column count has always exactly matched gmatch.HEADERS
+    # (it's created with that as its column count, and nothing else has ever
+    # needed more) - grow it once to make room for these extra columns.
+    if match_worksheet.col_count < snap_end_col:
+        sheet_call(
+            lambda: match_worksheet.resize(cols=snap_end_col),
+            description="Grow MatchData for snapshot columns",
+        )
+
+    existing_header = sheet_call(
+        lambda: match_worksheet.get(f"{snap_start_letter}1:{snap_end_letter}1"),
+        description="Read MatchData snapshot header",
+    )
+    if not existing_header or existing_header[0] != SNAPSHOT_HEADERS:
+        sheet_call(
+            lambda: match_worksheet.update(
+                f"{snap_start_letter}1:{snap_end_letter}1", [SNAPSHOT_HEADERS], value_input_option="RAW"
+            ),
+            description="Write MatchData snapshot header",
+        )
+
+    matchdata_values = read_existing_values(match_worksheet, "Read MatchData for snapshot")
+    if len(matchdata_values) < 2:
+        safe_print("Snapshot: MatchData is empty; nothing to do.")
+        return
+    match_id_col = gmatch.HEADERS.index("Match ID")
+    row_by_match_id: dict[str, int] = {}
+    for offset, row in enumerate(matchdata_values[1:]):
+        mid = normalize_sheet_value(value_at(row, match_id_col))
+        if mid:
+            row_by_match_id[mid] = offset + 2  # +2: header row + 1-based
+
+    matches_last_col = column_letters(43)  # A:AQ - through the win/draw/away-win probability columns
+    matches_values = sheet_call(
+        lambda: matches_worksheet.get(f"A2:{matches_last_col}", value_render_option="UNFORMATTED_VALUE"),
+        description="Read Matches tab for snapshot",
+    )
+
+    updates = []
+    for row in matches_values:
+        match_id = normalize_sheet_value(value_at(row, 0))
+        if not match_id or match_id not in row_by_match_id:
+            continue
+        if normalize_sheet_value(value_at(row, MATCHES_STARTED_COL)) in ("1", "true"):
+            continue  # already kicked off - whatever was last captured stays frozen
+
+        values = [value_at(row, c) for c in MATCHES_SNAPSHOT_SOURCE_COLS]
+        if values[0] == "" and values[1] == "":
+            continue  # no projection available yet (e.g. not enough matches played for a rating)
+
+        updates.append({
+            "range": f"{snap_start_letter}{row_by_match_id[match_id]}:{snap_end_letter}{row_by_match_id[match_id]}",
+            "values": [values],
+        })
+
+    if updates:
+        for start in range(0, len(updates), args.sheet_batch_size):
+            chunk = updates[start : start + args.sheet_batch_size]
+            sheet_call(
+                lambda chunk=chunk: match_worksheet.batch_update(chunk, value_input_option="RAW"),
+                description=f"Write pre-match snapshots {start + 1}-{start + len(chunk)}",
+            )
+    safe_print(f"Snapshot: captured pre-match projections for {len(updates):,} not-yet-started match(es).")
+
+
 def load_matchdata_competition_ids(args: argparse.Namespace) -> set[str] | None:
     """The competition allow-list for MatchData/Matches - a match is kept if its
     Competition ID OR Parent Competition ID is in this set (group-stage
@@ -1739,6 +1844,8 @@ def main() -> int:
             match_worksheet = spreadsheet.worksheet(args.match_worksheet)
             matchdata_ids = id_column_values(match_worksheet, "Read final MatchData IDs")[1:]
             sync_matches_tab(spreadsheet, matchdata_ids)
+        if not args.skip_projection_snapshot:
+            snapshot_pre_match_projections(spreadsheet, args)
 
     if not args.skip_individual_results:
         if all_matches is None:
