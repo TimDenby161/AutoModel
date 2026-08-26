@@ -373,6 +373,7 @@
   .team-fixture-opponent { font-size: 13px; font-weight: 600; }
   .team-fixture-venue { color: var(--text-muted); font-weight: 600; }
   .team-fixture-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .team-fixture-row .match-score { margin-top: 6px; }
   /* Player/Price/Mins stay pinned on the left while xPts/2GW/5GW/6GW/xG/xA/Def
      scroll underneath - compact padding+font so more of the scrolling half
      fits on screen at once too. */
@@ -1768,6 +1769,8 @@ function openTeamFixturesModal(clubId, clubName) {
           <div class="team-fixture-row">
             <div class="team-fixture-opponent">${escapeHtml(opponent)} <span class="team-fixture-venue">(${isHome ? "H" : "A"})</span></div>
             <div class="team-fixture-meta">${escapeHtml(m.League || "")} &middot; ${escapeHtml(formatKickoff(m.Date))}</div>
+            ${matchScoreCenter(m)}
+            ${matchProbsRow(m)}
           </div>
         `;
       }).join("")
