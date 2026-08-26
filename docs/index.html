@@ -171,6 +171,10 @@
     font-weight: 600; font-size: 11px; color: var(--series-aqua);
     flex-shrink: 0; width: 34px; text-align: right;
   }
+  .pitch-player-xa {
+    font-weight: 600; font-size: 11px; color: var(--series-orange);
+    flex-shrink: 0; width: 34px; text-align: right;
+  }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
@@ -1227,15 +1231,16 @@ function buildLineupsByClub(rows) {
       age: toNum(r.Age),
       ability: toNum(r.Ability),
       expGoals: toNum(r.ExpGoals),
+      expAssists: toNum(r.ExpAssists),
     });
   });
   return map;
 }
 
-// Expected-minutes color coding for a player's name: 80+ green, 60-80
+// Expected-minutes color coding for a player's row: 75+ green, 60-75
 // yellow, 45-60 orange, under 45 red.
 function minsColorClass(mins) {
-  if (mins >= 80) return "mins-green";
+  if (mins >= 75) return "mins-green";
   if (mins >= 60) return "mins-yellow";
   if (mins >= 45) return "mins-orange";
   return "mins-red";
@@ -1248,6 +1253,7 @@ function renderPitchPlayer(pos, entry) {
       <span class="pitch-player-name">${escapeHtml(entry.name)} <span class="pitch-player-ability">- ${entry.ability.toFixed(0)}</span></span>
       <span class="pitch-player-mins">${entry.mins}&prime;</span>
       <span class="pitch-player-xg">${entry.expGoals.toFixed(1)}xG</span>
+      <span class="pitch-player-xa">${entry.expAssists.toFixed(1)}xA</span>
     </div>
   `;
 }
