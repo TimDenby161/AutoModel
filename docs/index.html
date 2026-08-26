@@ -371,7 +371,17 @@
   .team-fixture-row { padding: 8px 0; }
   .team-fixture-row + .team-fixture-row { border-top: 1px solid var(--border); }
   .team-fixture-opponent { font-size: 13px; font-weight: 600; }
-  .team-fixture-venue { color: var(--text-muted); font-weight: 600; }
+  .team-fixture-venue {
+    display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
+    vertical-align: middle;
+  }
+  .team-fixture-venue.is-home {
+    background: color-mix(in srgb, var(--series-blue) 16%, transparent); color: var(--series-blue);
+  }
+  .team-fixture-venue.is-away {
+    background: color-mix(in srgb, var(--series-orange) 16%, transparent); color: var(--series-orange);
+  }
   .team-fixture-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
   .team-fixture-row .match-score { margin-top: 6px; }
   /* Player/Price/Mins stay pinned on the left while xPts/2GW/5GW/6GW/xG/xA/Def
@@ -1013,17 +1023,35 @@ function clubScoreLabel(raw) {
   return `<div class="club-score">${n.toLocaleString()}</div>`;
 }
 
-function matchScoreCenter(m) {
+// labeled=true tags each score with H/A - used where the two teams aren't
+// already laid out left(home)/right(away) on screen (e.g. the team fixtures
+// modal, which always lists the clicked team first regardless of venue).
+function matchScoreCenter(m, labeled) {
   const projH = parseFloat(m.ProjH);
   const projA = parseFloat(m.ProjA);
   if (!Number.isFinite(projH) || !Number.isFinite(projA)) {
     return `<div class="match-score"><span class="vs-text">vs</span></div>`;
   }
+  if (!labeled) {
+    return `
+      <div class="match-score has-proj">
+        <span class="proj-box">${projH.toFixed(1)}</span>
+        <span class="vs-text">vs</span>
+        <span class="proj-box">${projA.toFixed(1)}</span>
+      </div>
+    `;
+  }
   return `
     <div class="match-score has-proj">
-      <span class="proj-box">${projH.toFixed(1)}</span>
+      <div class="score-col">
+        <span class="proj-box">${projH.toFixed(1)}</span>
+        <span class="match-score-sub">H</span>
+      </div>
       <span class="vs-text">vs</span>
-      <span class="proj-box">${projA.toFixed(1)}</span>
+      <div class="score-col">
+        <span class="proj-box">${projA.toFixed(1)}</span>
+        <span class="match-score-sub">A</span>
+      </div>
     </div>
   `;
 }
@@ -1767,9 +1795,9 @@ function openTeamFixturesModal(clubId, clubName) {
         const opponent = isHome ? m.Away : m.Home;
         return `
           <div class="team-fixture-row">
-            <div class="team-fixture-opponent">${escapeHtml(opponent)} <span class="team-fixture-venue">(${isHome ? "H" : "A"})</span></div>
+            <div class="team-fixture-opponent">vs ${escapeHtml(opponent)} <span class="team-fixture-venue ${isHome ? "is-home" : "is-away"}">${isHome ? "HOME" : "AWAY"}</span></div>
             <div class="team-fixture-meta">${escapeHtml(m.League || "")} &middot; ${escapeHtml(formatKickoff(m.Date))}</div>
-            ${matchScoreCenter(m)}
+            ${matchScoreCenter(m, true)}
             ${matchProbsRow(m)}
           </div>
         `;
