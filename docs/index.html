@@ -24,6 +24,7 @@
     --series-aqua:    #1baf7a;
     --status-good:    #0ca30c;
     --status-critical:#d03b3b;
+    --status-warning: #a67c00;
     --chip-bg:        #f0efec;
   }
   @media (prefers-color-scheme: dark) {
@@ -41,6 +42,7 @@
       --series-aqua:    #199e70;
       --status-good:    #0ca30c;
       --status-critical:#e66767;
+      --status-warning: #e0b636;
       --chip-bg:        #26261f;
     }
   }
@@ -58,6 +60,7 @@
     --series-aqua:    #199e70;
     --status-good:    #0ca30c;
     --status-critical:#e66767;
+    --status-warning: #e0b636;
     --chip-bg:        #26261f;
   }
 
@@ -150,8 +153,12 @@
     flex: 1; min-width: 0; font-weight: 600; font-size: 12px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .pitch-player-name.mins-green  { color: var(--status-good); }
+  .pitch-player-name.mins-yellow { color: var(--status-warning); }
+  .pitch-player-name.mins-orange { color: var(--series-orange); }
+  .pitch-player-name.mins-red    { color: var(--status-critical); }
   .pitch-player-ability {
-    color: var(--text-muted); font-size: 11px; flex-shrink: 0;
+    color: var(--text-muted); font-weight: 600; font-size: 11px;
   }
   .pitch-player-mins {
     font-weight: 700; font-size: 13px; color: var(--series-blue);
@@ -1222,14 +1229,22 @@ function buildLineupsByClub(rows) {
   return map;
 }
 
+// Expected-minutes color coding for a player's name: 80+ green, 60-80
+// yellow, 45-60 orange, under 45 red.
+function minsColorClass(mins) {
+  if (mins >= 80) return "mins-green";
+  if (mins >= 60) return "mins-yellow";
+  if (mins >= 45) return "mins-orange";
+  return "mins-red";
+}
+
 function renderPitchPlayer(pos, entry) {
   return `
     <div class="pitch-player">
       <span class="pitch-player-pos">${pos}</span>
-      <span class="pitch-player-name">${escapeHtml(entry.name)}</span>
-      <span class="pitch-player-ability">${entry.ability.toFixed(0)}</span>
+      <span class="pitch-player-name ${minsColorClass(entry.mins)}">${escapeHtml(entry.name)} <span class="pitch-player-ability">- ${entry.ability.toFixed(0)}</span></span>
       <span class="pitch-player-mins">${entry.mins}&prime;</span>
-      <span class="pitch-player-xg">${entry.expGoals.toFixed(2)}xG</span>
+      <span class="pitch-player-xg">${entry.expGoals.toFixed(1)}xG</span>
     </div>
   `;
 }
