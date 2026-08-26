@@ -1194,23 +1194,46 @@ function applyDefaultDateAndRound(prefix) {
 // buildCompetitionList - "All" and "English Teams" are always pinned first,
 // then real competitions most-active-first, split across the visible row
 // and the "More" row the same way the old static markup did.
+// Fixed display order for the league chips - "All" is always first, then
+// this primary row (before "More"). Any of these not currently present in
+// the data (e.g. a competition with zero matches right now) is skipped
+// rather than shown as a dead filter.
+const PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "117", "eng"];
+// Curated order for the start of the "More" row - anything discovered in
+// the data that isn't listed here is appended after, most-active-first
+// (see buildCompetitionList), so a newly appearing competition is never
+// silently hidden.
+const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "42"];
+
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
   const mainRow = wrap.querySelector(".filter-row");
   const moreRow = wrap.querySelector(".filter-row-more");
   const currentFilter = state[`${prefix}Filter`];
   const competitions = buildCompetitionList();
+  const present = new Set(competitions.map((c) => c.id));
 
   const chip = (id, label) =>
     `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-pressed="${currentFilter === id}">${escapeHtml(label)}</button>`;
+  const labelForId = (id) => COMPETITION_LABELS[id] || competitions.find((c) => c.id === id)?.label || id;
 
-  const pinned = [chip("all", "All"), chip("eng", "English Teams")];
-  const visibleCount = 5;
-  const primary = competitions.slice(0, visibleCount).map((c) => chip(c.id, c.label));
-  const rest = competitions.slice(visibleCount).map((c) => chip(c.id, c.label));
+  const primaryIds = PRIMARY_CHIP_ORDER.filter((id) => id === "eng" || present.has(id));
+  const primary = [
+    chip("all", "All"),
+    ...primaryIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id))),
+  ];
+
+  const coveredIds = new Set([...primaryIds, "eng"]);
+  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) => present.has(id) && !coveredIds.has(id));
+  moreIdsOrdered.forEach((id) => coveredIds.add(id));
+  const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
+
+  const rest = [
+    ...moreIdsOrdered.map((id) => chip(id, labelForId(id))),
+    ...moreRest.map((c) => chip(c.id, c.label)),
+  ];
 
   mainRow.innerHTML =
-    pinned.join("") +
     primary.join("") +
     `<button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>`;
   moreRow.innerHTML = rest.join("");
