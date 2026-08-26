@@ -202,6 +202,12 @@
     cursor: pointer;
   }
   .comp-group-name:hover, .comp-group-name:focus-visible { text-decoration: underline; }
+  .team-name-link {
+    appearance: none; border: none; background: transparent; padding: 0;
+    font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+    cursor: pointer;
+  }
+  .team-name-link:hover, .team-name-link:focus-visible { text-decoration: underline; }
   .comp-group-count {
     color: var(--text-muted); font-weight: 600;
     font-variant-numeric: tabular-nums;
@@ -1453,12 +1459,12 @@ function renderFixtures() {
       </div>
       <div class="match-teams">
         <div class="match-team">
-          ${escapeHtml(m.Home)}
+          <button type="button" class="team-name-link" data-team-id="${escapeHtml(m.ID_1)}" data-team-name="${escapeHtml(m.Home)}">${escapeHtml(m.Home)}</button>
           ${clubScoreLabel(m.HomeScr)}
         </div>
         ${matchScoreCenter(m)}
         <div class="match-team away">
-          ${escapeHtml(m.Away)}
+          <button type="button" class="team-name-link" data-team-id="${escapeHtml(m.ID_2)}" data-team-name="${escapeHtml(m.Away)}">${escapeHtml(m.Away)}</button>
           ${clubScoreLabel(m.AwayScr)}
         </div>
       </div>
@@ -2113,6 +2119,11 @@ wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 // to each card - tapping a card toggles its own lineup panel, rendering it
 // lazily from the already-loaded LineupsCache data (no fetch at click time).
 document.getElementById("fixtures-list").addEventListener("click", (e) => {
+  const teamBtn = e.target.closest("[data-team-id]");
+  if (teamBtn) {
+    openTeamFixturesModal(teamBtn.dataset.teamId, teamBtn.dataset.teamName);
+    return;
+  }
   const jumpBtn = e.target.closest("[data-jump-league]");
   if (jumpBtn) {
     selectLeagueFilter("fixture", jumpBtn.dataset.jumpLeague);
