@@ -279,6 +279,22 @@
   }
   .filter-more { color: var(--series-blue); font-weight: 700; }
   .filter-more[aria-expanded="true"] { background: var(--chip-bg); }
+  .secondary-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .date-filter-group { display: flex; align-items: center; gap: 2px; }
+  .date-filter-input, .round-filter-select {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 6px 10px; border-radius: 20px;
+  }
+  .round-filter-select:disabled { opacity: 0.5; }
+  .date-filter-clear {
+    appearance: none; border: none; background: transparent; color: var(--text-muted);
+    font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
+  }
+  .date-filter-clear[hidden] { display: none; }
   #table-view-toggle { margin-bottom: 10px; }
 
   .search-row { margin-bottom: 10px; }
@@ -461,6 +477,15 @@
         <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
       </div>
     </div>
+    <div class="secondary-filters">
+      <div class="date-filter-group">
+        <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
+        <button type="button" class="date-filter-clear" id="fixture-date-clear" hidden aria-label="Clear date filter">&times;</button>
+      </div>
+      <select id="fixture-round-filter" class="round-filter-select" disabled>
+        <option value="">Select a league for rounds</option>
+      </select>
+    </div>
     <div id="fixtures-list" class="card-list"></div>
   </section>
 
@@ -487,6 +512,15 @@
         <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
         <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
       </div>
+    </div>
+    <div class="secondary-filters">
+      <div class="date-filter-group">
+        <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
+        <button type="button" class="date-filter-clear" id="result-date-clear" hidden aria-label="Clear date filter">&times;</button>
+      </div>
+      <select id="result-round-filter" class="round-filter-select" disabled>
+        <option value="">Select a league for rounds</option>
+      </select>
     </div>
     <div id="results-list" class="card-list"></div>
   </section>
@@ -621,6 +655,13 @@ const state = {
   // just the DOM.
   collapsedFixtureGroups: new Set(),
   collapsedResultGroups: new Set(),
+  // Date filter: "" = unset, else a "YYYY-MM-DD" string straight from the
+  // <input type="date">. Round filter: "" = "All rounds", else a Round
+  // value as it appears on the Matches tab (e.g. "12", "1/8") - only
+  // meaningful once a specific league is selected, since round numbers
+  // aren't comparable across competitions.
+  fixtureDateFilter: "", resultDateFilter: "",
+  fixtureRoundFilter: "", resultRoundFilter: "",
 };
 
 const LINEUP_POSITIONS = ["GK","LB","CB","RB","DM","LWB","RWB","LM","CM","RM","LW","AM","RW","ST"];
@@ -979,6 +1020,61 @@ const FIXTURES_LOOKAHEAD_COUNT = 20;
 // fixtures on the same days.
 const FIXTURES_GUARANTEED_DAYS = 4;
 
+// <input type="date">'s value is "YYYY-MM-DD" - new Date(str) on that parses
+// as UTC midnight, which can land on the wrong local day in negative-UTC
+// timezones. Parse the components directly instead, so it lands on local
+// midnight and compares correctly via isSameLocalDay.
+function parseLocalDateInput(value) {
+  if (!value) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+// Rebuilds the Round <select> for a Fixtures/Results panel from whichever
+// rounds are actually present for the currently selected league - round
+// numbers aren't comparable across competitions, so this is disabled
+// entirely on "All". Call whenever the league filter changes or fresh data
+// loads, since both can change which rounds are available.
+function populateRoundFilter(prefix) {
+  const select = document.getElementById(`${prefix}-round-filter`);
+  const leagueFilter = state[`${prefix}Filter`];
+  const leagueIds = LEAGUE_FILTERS[leagueFilter];
+  const isFixtures = prefix === "fixture";
+
+  if (!leagueIds) {
+    select.innerHTML = `<option value="">Select a league for rounds</option>`;
+    select.disabled = true;
+    state[`${prefix}RoundFilter`] = "";
+    return;
+  }
+
+  const relevant = state.fixtures.filter((m) =>
+    leagueIds.includes(String(m.ID)) &&
+    toNum(m.Cancelled) === 0 &&
+    (isFixtures ? toNum(m.Started) === 0 : toNum(m.Finished) === 1)
+  );
+  const rounds = [...new Set(relevant.map((m) => String(m.Round || "").trim()).filter(Boolean))];
+  rounds.sort((a, b) => {
+    const na = parseFloat(a);
+    const nb = parseFloat(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+
+  const currentValue = state[`${prefix}RoundFilter`];
+  select.innerHTML =
+    `<option value="">All rounds</option>` +
+    rounds.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
+  select.disabled = rounds.length === 0;
+  if (rounds.includes(currentValue)) {
+    select.value = currentValue;
+  } else {
+    state[`${prefix}RoundFilter`] = "";
+    select.value = "";
+  }
+}
+
 // Groups an already-sorted match list by competition, preserving each
 // group's position from wherever its first match falls in that order - so
 // fixtures group with the soonest-kicking-off competition first, and
@@ -1035,10 +1131,14 @@ function renderFixtures() {
   const today = new Date();
   const leagueIds = LEAGUE_FILTERS[state.fixtureFilter];
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dateFilter = parseLocalDateInput(state.fixtureDateFilter);
+  const roundFilter = state.fixtureRoundFilter;
   const allUpcoming = state.fixtures
     .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
     .filter((m) => new Date(m.Date) >= todayStart)
     .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
+    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
+    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
     .sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
   if (!allUpcoming.length) {
@@ -1046,18 +1146,27 @@ function renderFixtures() {
     return;
   }
 
-  // Everything within the guaranteed window always makes the list; beyond
-  // that, backfill with the next-soonest fixtures up to the cap so a quiet
-  // stretch still shows plenty coming up.
-  const guaranteedThrough = new Date(todayStart);
-  guaranteedThrough.setDate(guaranteedThrough.getDate() + FIXTURES_GUARANTEED_DAYS);
-  const guaranteed = allUpcoming.filter((m) => new Date(m.Date) < guaranteedThrough);
-  const rest = allUpcoming.filter((m) => new Date(m.Date) >= guaranteedThrough);
-  const upcoming = guaranteed.concat(rest).slice(0, Math.max(FIXTURES_LOOKAHEAD_COUNT, guaranteed.length));
-  const hasToday = upcoming.some((m) => isSameLocalDay(m.Date, today));
-  const note = hasToday
-    ? ""
-    : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
+  // A specific date or round is a deliberately narrow query - show
+  // everything that matches instead of capping/backfilling like the
+  // default rolling view does.
+  let upcoming;
+  let note = "";
+  if (dateFilter || roundFilter) {
+    upcoming = allUpcoming;
+  } else {
+    // Everything within the guaranteed window always makes the list; beyond
+    // that, backfill with the next-soonest fixtures up to the cap so a quiet
+    // stretch still shows plenty coming up.
+    const guaranteedThrough = new Date(todayStart);
+    guaranteedThrough.setDate(guaranteedThrough.getDate() + FIXTURES_GUARANTEED_DAYS);
+    const guaranteed = allUpcoming.filter((m) => new Date(m.Date) < guaranteedThrough);
+    const rest = allUpcoming.filter((m) => new Date(m.Date) >= guaranteedThrough);
+    upcoming = guaranteed.concat(rest).slice(0, Math.max(FIXTURES_LOOKAHEAD_COUNT, guaranteed.length));
+    const hasToday = upcoming.some((m) => isSameLocalDay(m.Date, today));
+    note = hasToday
+      ? ""
+      : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
+  }
 
   const groups = groupByCompetition(upcoming);
   container.innerHTML = note + renderGroupedMatches(groups, state.collapsedFixtureGroups, (m) => `
@@ -1109,11 +1218,18 @@ function finalScoreCenter(m) {
 function renderResults() {
   const container = document.getElementById("results-list");
   const leagueIds = LEAGUE_FILTERS[state.resultFilter];
-  const recent = state.fixtures
+  const dateFilter = parseLocalDateInput(state.resultDateFilter);
+  const roundFilter = state.resultRoundFilter;
+  const matching = state.fixtures
     .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date)
     .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
-    .sort((a, b) => new Date(b.Date) - new Date(a.Date))
-    .slice(0, CONFIG.resultsCount);
+    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
+    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
+    .sort((a, b) => new Date(b.Date) - new Date(a.Date));
+
+  // A specific date or round is a deliberately narrow query - show
+  // everything that matches instead of capping to the default rolling count.
+  const recent = (dateFilter || roundFilter) ? matching : matching.slice(0, CONFIG.resultsCount);
 
   if (!recent.length) {
     container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
@@ -1480,6 +1596,8 @@ async function loadData() {
     fetchWithRetry(() => fetchSheetValues(CONFIG.matchesTabName).then((v) => sheetRowsToObjects(v)), "Matches")
       .then((fixtures) => {
         state.fixtures = fixtures;
+        populateRoundFilter("fixture");
+        populateRoundFilter("result");
         renderFixtures();
         renderResults();
       })
@@ -1571,6 +1689,7 @@ document.querySelectorAll("#fixture-filters .filter-chip[data-filter]").forEach(
     document.querySelectorAll("#fixture-filters .filter-chip[data-filter]").forEach((b) => b.setAttribute("aria-pressed", "false"));
     btn.setAttribute("aria-pressed", "true");
     state.fixtureFilter = btn.dataset.filter;
+    populateRoundFilter("fixture");
     renderFixtures();
   });
 });
@@ -1580,9 +1699,34 @@ document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((
     document.querySelectorAll("#result-filters .filter-chip[data-filter]").forEach((b) => b.setAttribute("aria-pressed", "false"));
     btn.setAttribute("aria-pressed", "true");
     state.resultFilter = btn.dataset.filter;
+    populateRoundFilter("result");
     renderResults();
   });
 });
+
+function wireDateRoundFilters(prefix, renderFn) {
+  const dateInput = document.getElementById(`${prefix}-date-filter`);
+  const dateClear = document.getElementById(`${prefix}-date-clear`);
+  const roundSelect = document.getElementById(`${prefix}-round-filter`);
+
+  dateInput.addEventListener("change", () => {
+    state[`${prefix}DateFilter`] = dateInput.value;
+    dateClear.hidden = !dateInput.value;
+    renderFn();
+  });
+  dateClear.addEventListener("click", () => {
+    dateInput.value = "";
+    state[`${prefix}DateFilter`] = "";
+    dateClear.hidden = true;
+    renderFn();
+  });
+  roundSelect.addEventListener("change", () => {
+    state[`${prefix}RoundFilter`] = roundSelect.value;
+    renderFn();
+  });
+}
+wireDateRoundFilters("fixture", renderFixtures);
+wireDateRoundFilters("result", renderResults);
 
 document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((btn) => {
   btn.addEventListener("click", () => {
