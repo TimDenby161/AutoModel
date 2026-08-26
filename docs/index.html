@@ -296,6 +296,15 @@
     padding: 6px 10px; border-radius: 20px;
   }
   .round-filter-select:disabled { opacity: 0.5; }
+  .round-filter-group { display: flex; align-items: center; gap: 4px; }
+  .round-nav-btn {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-secondary); font-family: inherit; font-size: 14px; font-weight: 700;
+    width: 26px; height: 26px; border-radius: 50%; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .round-nav-btn:disabled { opacity: 0.35; }
+  .round-nav-btn:active:not(:disabled) { opacity: 0.6; }
   .date-filter-clear {
     appearance: none; border: none; background: transparent; color: var(--text-muted);
     font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
@@ -469,9 +478,13 @@
         <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
         <button type="button" class="date-filter-clear" id="fixture-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
-      <select id="fixture-round-filter" class="round-filter-select" disabled>
-        <option value="">Select a league for rounds</option>
-      </select>
+      <div class="round-filter-group">
+        <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
+        <select id="fixture-round-filter" class="round-filter-select" disabled>
+          <option value="">Select a league for rounds</option>
+        </select>
+        <button type="button" class="round-nav-btn" id="fixture-round-next" aria-label="Next round" disabled>&#8250;</button>
+      </div>
     </div>
     <div id="fixtures-list" class="card-list"></div>
   </section>
@@ -486,9 +499,13 @@
         <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
         <button type="button" class="date-filter-clear" id="result-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
-      <select id="result-round-filter" class="round-filter-select" disabled>
-        <option value="">Select a league for rounds</option>
-      </select>
+      <div class="round-filter-group">
+        <button type="button" class="round-nav-btn" id="result-round-prev" aria-label="Previous round" disabled>&#8249;</button>
+        <select id="result-round-filter" class="round-filter-select" disabled>
+          <option value="">Select a league for rounds</option>
+        </select>
+        <button type="button" class="round-nav-btn" id="result-round-next" aria-label="Next round" disabled>&#8250;</button>
+      </div>
     </div>
     <div id="results-list" class="card-list"></div>
   </section>
@@ -1187,24 +1204,16 @@ function selectLeagueFilter(prefix, filterValue) {
   (prefix === "fixture" ? renderFixtures : renderResults)();
 }
 
-// Rebuilds the Round <select> for a Fixtures/Results panel from whichever
-// rounds are actually present for the currently selected competition -
-// round numbers aren't comparable across competitions, so this is disabled
-// for "All"/"English Teams". Call whenever the league filter changes or
-// fresh data loads, since both can change which rounds are available.
-function populateRoundFilter(prefix) {
-  const select = document.getElementById(`${prefix}-round-filter`);
+// The sorted list of rounds actually present for the currently selected
+// competition - shared by populateRoundFilter (the <select>'s options) and
+// stepRound (the prev/next buttons), so both always agree on what "next"
+// means. Empty for "All"/"English Teams" - round numbers aren't comparable
+// across competitions.
+function getAvailableRounds(prefix) {
   const filterValue = state[`${prefix}Filter`];
-  const isFixtures = prefix === "fixture";
-
-  if (!isSingleCompetitionFilter(filterValue)) {
-    select.innerHTML = `<option value="">Select a league for rounds</option>`;
-    select.disabled = true;
-    state[`${prefix}RoundFilter`] = "";
-    return;
-  }
-
+  if (!isSingleCompetitionFilter(filterValue)) return [];
   const ids = competitionIdsFor(filterValue);
+  const isFixtures = prefix === "fixture";
   const relevant = state.fixtures.filter((m) =>
     ids.includes(String(m.ID)) &&
     toNum(m.Cancelled) === 0 &&
@@ -1217,6 +1226,23 @@ function populateRoundFilter(prefix) {
     if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
     return a.localeCompare(b);
   });
+  return rounds;
+}
+
+// Rebuilds the Round <select> for a Fixtures/Results panel from
+// getAvailableRounds. Call whenever the league filter changes or fresh data
+// loads, since both can change which rounds are available.
+function populateRoundFilter(prefix) {
+  const select = document.getElementById(`${prefix}-round-filter`);
+  const rounds = getAvailableRounds(prefix);
+
+  if (!isSingleCompetitionFilter(state[`${prefix}Filter`])) {
+    select.innerHTML = `<option value="">Select a league for rounds</option>`;
+    select.disabled = true;
+    state[`${prefix}RoundFilter`] = "";
+    updateRoundNavButtons(prefix);
+    return;
+  }
 
   const currentValue = state[`${prefix}RoundFilter`];
   select.innerHTML =
@@ -1229,6 +1255,36 @@ function populateRoundFilter(prefix) {
     state[`${prefix}RoundFilter`] = "";
     select.value = "";
   }
+  updateRoundNavButtons(prefix);
+}
+
+// Enables/disables the prev/next round buttons based on where the current
+// round sits in getAvailableRounds - disabled entirely with no rounds
+// available, and at whichever end is already showing.
+function updateRoundNavButtons(prefix) {
+  const rounds = getAvailableRounds(prefix);
+  const prevBtn = document.getElementById(`${prefix}-round-prev`);
+  const nextBtn = document.getElementById(`${prefix}-round-next`);
+  const idx = rounds.indexOf(state[`${prefix}RoundFilter`]);
+
+  prevBtn.disabled = rounds.length === 0 || idx === 0;
+  nextBtn.disabled = rounds.length === 0 || idx === rounds.length - 1;
+}
+
+// Moves the round filter one step forward (direction=1) or back
+// (direction=-1) through getAvailableRounds. If no round is currently
+// selected (e.g. the user had picked "All rounds"), next jumps to the
+// first round and previous jumps to the last.
+function stepRound(prefix, direction) {
+  const rounds = getAvailableRounds(prefix);
+  if (!rounds.length) return;
+  let idx = rounds.indexOf(state[`${prefix}RoundFilter`]);
+  idx = idx === -1 ? (direction > 0 ? 0 : rounds.length - 1) : Math.min(rounds.length - 1, Math.max(0, idx + direction));
+
+  state[`${prefix}RoundFilter`] = rounds[idx];
+  document.getElementById(`${prefix}-round-filter`).value = rounds[idx];
+  updateRoundNavButtons(prefix);
+  (prefix === "fixture" ? renderFixtures : renderResults)();
 }
 
 // Groups an already-sorted match list by Competition ID (not the raw
@@ -1870,6 +1926,8 @@ function wireDateRoundFilters(prefix, renderFn) {
   const dateInput = document.getElementById(`${prefix}-date-filter`);
   const dateClear = document.getElementById(`${prefix}-date-clear`);
   const roundSelect = document.getElementById(`${prefix}-round-filter`);
+  const roundPrev = document.getElementById(`${prefix}-round-prev`);
+  const roundNext = document.getElementById(`${prefix}-round-next`);
 
   dateInput.addEventListener("change", () => {
     state[`${prefix}DateFilter`] = dateInput.value;
@@ -1884,8 +1942,11 @@ function wireDateRoundFilters(prefix, renderFn) {
   });
   roundSelect.addEventListener("change", () => {
     state[`${prefix}RoundFilter`] = roundSelect.value;
+    updateRoundNavButtons(prefix);
     renderFn();
   });
+  roundPrev.addEventListener("click", () => stepRound(prefix, -1));
+  roundNext.addEventListener("click", () => stepRound(prefix, 1));
 }
 wireDateRoundFilters("fixture", renderFixtures);
 wireDateRoundFilters("result", renderResults);
