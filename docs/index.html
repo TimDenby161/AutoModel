@@ -300,6 +300,11 @@
   }
   .filter-more { color: var(--series-blue); font-weight: 700; }
   .filter-more[aria-expanded="true"] { background: var(--chip-bg); }
+  .filter-more-icon {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1;
+  }
   .secondary-filters {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     margin-bottom: 10px;
@@ -1331,7 +1336,7 @@ function renderLeagueFilterChips(prefix) {
 
   mainRow.innerHTML =
     primary.join("") +
-    `<button type="button" class="filter-chip filter-more" data-more-toggle aria-label="Show more leagues" title="Show more leagues" aria-expanded="false"><span class="filter-label-full">More &#9662;</span><span class="filter-label-short">&#9662;</span></button>`;
+    `<button type="button" class="filter-chip filter-more" data-more-toggle aria-label="Show more leagues" title="Show more leagues" aria-expanded="false"><span class="filter-more-icon">&#9662;</span></button>`;
   moreRow.innerHTML = rest.join("");
   moreRow.hidden = true;
   wireMoreToggle(wrap);
@@ -1353,7 +1358,7 @@ function selectLeagueFilter(prefix, filterValue) {
     toggle.setAttribute("aria-expanded", "true");
     toggle.setAttribute("aria-label", "Show fewer leagues");
     toggle.setAttribute("title", "Show fewer leagues");
-    toggle.innerHTML = `<span class="filter-label-full">Less &#9652;</span><span class="filter-label-short">&#9652;</span>`;
+    toggle.innerHTML = `<span class="filter-more-icon">&#9652;</span>`;
   }
 
   state[`${prefix}Filter`] = filterValue;
@@ -2264,8 +2269,8 @@ function wireMoreToggle(wrap) {
     toggle.setAttribute("aria-label", nextExpanded ? "Show fewer leagues" : "Show more leagues");
     toggle.setAttribute("title", nextExpanded ? "Show fewer leagues" : "Show more leagues");
     toggle.innerHTML = nextExpanded
-      ? `<span class="filter-label-full">Less &#9652;</span><span class="filter-label-short">&#9652;</span>`
-      : `<span class="filter-label-full">More &#9662;</span><span class="filter-label-short">&#9662;</span>`;
+      ? `<span class="filter-more-icon">&#9652;</span>`
+      : `<span class="filter-more-icon">&#9662;</span>`;
   });
 }
 wireMoreToggle(document.getElementById("table-filters"));
