@@ -1311,7 +1311,9 @@ function renderLeagueFilterChips(prefix) {
   const shortLabelForId = (id) => FIXTURE_MOBILE_FILTER_LABELS[id] || labelForId(id);
 
   const primaryOrder = prefix === "fixture" ? FIXTURE_PRIMARY_CHIP_ORDER : PRIMARY_CHIP_ORDER;
-  const primaryIds = primaryOrder.filter((id) => id === "eng" || present.has(id));
+  const primaryIds = primaryOrder.filter((id) =>
+    id === "eng" || prefix === "fixture" || present.has(id)
+  );
   const primary = [
     chip("all", "All", "All", shortLabelForId("all")),
     ...primaryIds.map((id) =>
