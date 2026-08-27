@@ -1225,26 +1225,19 @@ function applyDefaultDateAndRound(prefix) {
 }
 
 // (Re)builds the league filter chips for a Fixtures/Results panel from
-// buildCompetitionList - "All" is always first, then this fixed curated
-// order for both the visible row and the "More" row. Any entry not
-// currently present in the data (e.g. a competition with zero matches
-// right now) is skipped rather than shown as a dead filter.
-// Domestic pyramid + major English/European cups first, then the rest of
-// Europe, then National League and anything not explicitly listed
-// (inserted at "__unlisted__", most-active-first - see buildCompetitionList
-// - so a newly appearing competition is never silently hidden), with
-// National League N/S and PL2 deliberately last.
-const CHIP_ORDER = [
-  "47", "eng", "42", "132", "133", "73", "10216",
-  "48", "108", "109", "142",
-  "54", "87", "55", "53", "71", "536",
-  "117",
-  "__unlisted__",
-  "8944", "9084",
-];
-// How many named chips (after "All") stay in the always-visible row before
-// the rest fall under "More" - keeps the same visible density as before.
-const PRIMARY_CHIP_COUNT = 6;
+// buildCompetitionList - "All" and "English Teams" are always pinned first,
+// then real competitions most-active-first, split across the visible row
+// and the "More" row the same way the old static markup did.
+// Fixed display order for the league chips - "All" is always first, then
+// this primary row (before "More"). Any of these not currently present in
+// the data (e.g. a competition with zero matches right now) is skipped
+// rather than shown as a dead filter.
+const PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "117", "eng"];
+// Curated order for the start of the "More" row - anything discovered in
+// the data that isn't listed here is appended after, most-active-first
+// (see buildCompetitionList), so a newly appearing competition is never
+// silently hidden.
+const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "42"];
 
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
@@ -1258,21 +1251,21 @@ function renderLeagueFilterChips(prefix) {
     `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-pressed="${currentFilter === id}">${escapeHtml(label)}</button>`;
   const labelForId = (id) => COMPETITION_LABELS[id] || competitions.find((c) => c.id === id)?.label || id;
 
-  const listedIds = new Set(CHIP_ORDER.filter((id) => id !== "__unlisted__"));
-  const unlistedIds = competitions.filter((c) => !listedIds.has(c.id)).map((c) => c.id);
+  const primaryIds = PRIMARY_CHIP_ORDER.filter((id) => id === "eng" || present.has(id));
+  const primary = [
+    chip("all", "All"),
+    ...primaryIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id))),
+  ];
 
-  const orderedIds = [];
-  CHIP_ORDER.forEach((id) => {
-    if (id === "__unlisted__") {
-      orderedIds.push(...unlistedIds);
-    } else if (id === "eng" || present.has(id)) {
-      orderedIds.push(id);
-    }
-  });
+  const coveredIds = new Set([...primaryIds, "eng"]);
+  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) => present.has(id) && !coveredIds.has(id));
+  moreIdsOrdered.forEach((id) => coveredIds.add(id));
+  const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
 
-  const namedChips = orderedIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id)));
-  const primary = [chip("all", "All"), ...namedChips.slice(0, PRIMARY_CHIP_COUNT)];
-  const rest = namedChips.slice(PRIMARY_CHIP_COUNT);
+  const rest = [
+    ...moreIdsOrdered.map((id) => chip(id, labelForId(id))),
+    ...moreRest.map((c) => chip(c.id, c.label)),
+  ];
 
   mainRow.innerHTML =
     primary.join("") +
@@ -1402,11 +1395,28 @@ function stepDate(prefix, direction) {
   (prefix === "fixture" ? renderFixtures : renderResults)();
 }
 
+// Curated priority order for how competition groups are stacked in the
+// Fixtures/Results list - domestic pyramid + major English/European cups
+// first, then the rest of Europe, then National League and anything not
+// explicitly listed (inserted at "__unlisted__", keeping their original
+// chronological order relative to each other - see groupByCompetition), with
+// National League N/S and PL2 deliberately last.
+const GROUP_ORDER = [
+  "47", "42", "132", "133", "73", "10216",
+  "48", "108", "109", "142",
+  "54", "87", "55", "53", "71", "536",
+  "117",
+  "__unlisted__",
+  "8944", "9084",
+];
+
 // Groups an already-sorted match list by Competition ID (not the raw
-// "League" text - see COMPETITION_LABELS), preserving each group's position
-// from wherever its first match falls in that order - so fixtures group
-// with the soonest-kicking-off competition first, and results group with
-// the most-recently-finished competition first.
+// "League" text - see COMPETITION_LABELS), then stacks the groups by
+// GROUP_ORDER rather than by whichever competition's first match happens to
+// fall earliest/latest chronologically - a quiet cup tie shouldn't jump
+// above the Premier League just because it kicks off a few hours sooner.
+// Anything not in GROUP_ORDER keeps its original chronological order
+// relative to other unlisted competitions.
 function groupByCompetition(matches) {
   const order = [];
   const groups = {};
@@ -1418,7 +1428,21 @@ function groupByCompetition(matches) {
     }
     groups[id].matches.push(m);
   });
-  return order.map((id) => groups[id]);
+
+  const present = new Set(order);
+  const listed = new Set(GROUP_ORDER.filter((id) => id !== "__unlisted__"));
+  const unlisted = order.filter((id) => !listed.has(id));
+
+  const sortedOrder = [];
+  GROUP_ORDER.forEach((id) => {
+    if (id === "__unlisted__") {
+      sortedOrder.push(...unlisted);
+    } else if (present.has(id)) {
+      sortedOrder.push(id);
+    }
+  });
+
+  return sortedOrder.map((id) => groups[id]);
 }
 
 // Shared by renderFixtures/renderResults - wraps each competition's cards in
