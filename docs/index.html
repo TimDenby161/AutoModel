@@ -256,6 +256,10 @@
     font-size: 11px; font-weight: 600; color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
+  .pens-tag {
+    align-self: center; font-size: 10px; font-weight: 700;
+    color: var(--text-muted); margin-left: 2px; white-space: nowrap;
+  }
   .match-probs { margin-top: 8px; }
   .prob-bar {
     display: flex; gap: 2px; height: 6px;
@@ -1484,6 +1488,24 @@ function projScoreSub(raw) {
   return `<div class="match-score-sub">${n.toFixed(1)}</div>`;
 }
 
+// For a match decided on penalties, FotMob's HomeS/AwayS actually holds
+// goals-plus-shootout-penalties combined (e.g. a 1-1 draw that River Plate
+// lost 7-8 on pens reports HomeS/AwayS as 8-9), not a real scoreline. Score
+// (mirrored from MatchData's scoreStr) is the genuine regulation-time
+// result and is what should be shown/graded against - HomeS/AwayS is only
+// a fallback for the rare row where Score isn't populated.
+function finalScore(m) {
+  const parsed = String(m.Score || "").match(/^(\d+)\s*-\s*(\d+)$/);
+  if (parsed) return { home: parseFloat(parsed[1]), away: parseFloat(parsed[2]) };
+  const home = parseFloat(m.HomeS);
+  const away = parseFloat(m.AwayS);
+  return Number.isFinite(home) && Number.isFinite(away) ? { home, away } : null;
+}
+
+function decidedOnPenalties(m) {
+  return /penalt/i.test(m.StatusReason || "");
+}
+
 // How good the frozen pre-kickoff projection (SnapProjH/SnapProjA) turned
 // out to be, judged the way a person would read it: did it call the right
 // winner first, THEN how close was the margin - not raw goal-count error.
@@ -1492,8 +1514,9 @@ function projScoreSub(raw) {
 // are 3+ goals off; a projected home win for a game the away side won is a
 // bad projection even if the final margin was just 1 goal.
 function scoreAccuracyTier(m) {
-  const actualH = parseFloat(m.HomeS);
-  const actualA = parseFloat(m.AwayS);
+  const actual = finalScore(m);
+  const actualH = actual ? actual.home : NaN;
+  const actualA = actual ? actual.away : NaN;
   const projH = parseFloat(m.SnapProjH);
   const projA = parseFloat(m.SnapProjA);
   if (![actualH, actualA, projH, projA].every(Number.isFinite)) return null;
@@ -1511,19 +1534,25 @@ function scoreAccuracyTier(m) {
 }
 
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
-// SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot.
+// SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot. The main
+// score is the regulation-time result (see finalScore) with a "(pens)" tag
+// when the tie was actually decided on penalties.
 function finalScoreCenter(m) {
+  const score = finalScore(m);
+  const homeDisplay = score ? score.home : escapeHtml(m.HomeS);
+  const awayDisplay = score ? score.away : escapeHtml(m.AwayS);
   return `
     <div class="match-score has-proj">
       <div class="score-col">
-        <span class="proj-box">${escapeHtml(m.HomeS)}</span>
+        <span class="proj-box">${homeDisplay}</span>
         ${projScoreSub(m.SnapProjH)}
       </div>
       <span class="vs-text">&ndash;</span>
       <div class="score-col">
-        <span class="proj-box">${escapeHtml(m.AwayS)}</span>
+        <span class="proj-box">${awayDisplay}</span>
         ${projScoreSub(m.SnapProjA)}
       </div>
+      ${decidedOnPenalties(m) ? '<span class="pens-tag">(pens)</span>' : ""}
     </div>
   `;
 }
