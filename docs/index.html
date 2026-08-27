@@ -311,14 +311,14 @@
   }
   .round-filter-select:disabled { opacity: 0.5; }
   .round-filter-group { display: flex; align-items: center; gap: 4px; }
-  .round-nav-btn {
+  .round-nav-btn, .date-nav-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-secondary); font-family: inherit; font-size: 14px; font-weight: 700;
     width: 26px; height: 26px; border-radius: 50%; line-height: 1;
     display: flex; align-items: center; justify-content: center;
   }
   .round-nav-btn:disabled { opacity: 0.35; }
-  .round-nav-btn:active:not(:disabled) { opacity: 0.6; }
+  .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
   .date-filter-clear {
     appearance: none; border: none; background: transparent; color: var(--text-muted);
     font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
@@ -516,7 +516,9 @@
     </div>
     <div class="secondary-filters">
       <div class="date-filter-group">
+        <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
         <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
+        <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
         <button type="button" class="date-filter-clear" id="fixture-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
       <div class="round-filter-group">
@@ -537,7 +539,9 @@
     </div>
     <div class="secondary-filters">
       <div class="date-filter-group">
+        <button type="button" class="date-nav-btn" id="result-date-prev" aria-label="Previous day">&#8249;</button>
         <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
+        <button type="button" class="date-nav-btn" id="result-date-next" aria-label="Next day">&#8250;</button>
         <button type="button" class="date-filter-clear" id="result-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
       <div class="round-filter-group">
@@ -1156,13 +1160,19 @@ function todayDateStr() {
   return dateStrOf(new Date());
 }
 
-// The most recent day with at least one finished match, across whatever
-// competitions are in scope - Results' "All"/"English Teams" default.
-function mostRecentResultDateStr() {
-  const finished = state.fixtures.filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date);
-  if (!finished.length) return "";
-  const latest = finished.reduce((max, m) => (new Date(m.Date) > new Date(max.Date) ? m : max));
-  return dateStrOf(latest.Date);
+// Results' "All"/"English Teams" default: today if anything's finished
+// today, otherwise yesterday - deliberately not "most recent result day"
+// (which could be arbitrarily far back on a quiet day), so the default
+// view never shows stale results without the user asking for them.
+function defaultResultDateStr() {
+  const today = todayDateStr();
+  const hasToday = state.fixtures.some((m) =>
+    toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date && isSameLocalDay(m.Date, parseLocalDateInput(today))
+  );
+  if (hasToday) return today;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return dateStrOf(yesterday);
 }
 
 // The round of the soonest upcoming match (Fixtures) / most recent finished
@@ -1185,7 +1195,7 @@ function defaultRoundFor(prefix, filterValue) {
 }
 
 // Sets the date/round filters to this filter's default view: "All"/
-// "English Teams" browse by date (today for Fixtures, most recent match day
+// "English Teams" browse by date (today for Fixtures, today-or-yesterday
 // for Results); one specific competition browses by round instead (next
 // round for Fixtures, last round for Results).
 function applyDefaultDateAndRound(prefix) {
@@ -1197,7 +1207,7 @@ function applyDefaultDateAndRound(prefix) {
     state[`${prefix}DateFilter`] = "";
     state[`${prefix}RoundFilter`] = defaultRoundFor(prefix, filterValue);
   } else {
-    state[`${prefix}DateFilter`] = prefix === "fixture" ? todayDateStr() : mostRecentResultDateStr();
+    state[`${prefix}DateFilter`] = prefix === "fixture" ? todayDateStr() : defaultResultDateStr();
     state[`${prefix}RoundFilter`] = "";
   }
   dateInput.value = state[`${prefix}DateFilter`];
@@ -1358,6 +1368,20 @@ function stepRound(prefix, direction) {
   state[`${prefix}RoundFilter`] = rounds[idx];
   document.getElementById(`${prefix}-round-filter`).value = rounds[idx];
   updateRoundNavButtons(prefix);
+  (prefix === "fixture" ? renderFixtures : renderResults)();
+}
+
+// Moves the date filter one day forward/back. Works regardless of which
+// league filter is active (unlike round stepping, which needs one specific
+// competition selected) - starts from today if no date is currently set.
+function stepDate(prefix, direction) {
+  const current = parseLocalDateInput(state[`${prefix}DateFilter`]) || new Date();
+  current.setDate(current.getDate() + direction);
+  const newDateStr = dateStrOf(current);
+
+  state[`${prefix}DateFilter`] = newDateStr;
+  document.getElementById(`${prefix}-date-filter`).value = newDateStr;
+  document.getElementById(`${prefix}-date-clear`).hidden = false;
   (prefix === "fixture" ? renderFixtures : renderResults)();
 }
 
@@ -2135,10 +2159,14 @@ document.getElementById("result-filters").addEventListener("click", (e) => {
 function wireDateRoundFilters(prefix, renderFn) {
   const dateInput = document.getElementById(`${prefix}-date-filter`);
   const dateClear = document.getElementById(`${prefix}-date-clear`);
+  const datePrev = document.getElementById(`${prefix}-date-prev`);
+  const dateNext = document.getElementById(`${prefix}-date-next`);
   const roundSelect = document.getElementById(`${prefix}-round-filter`);
   const roundPrev = document.getElementById(`${prefix}-round-prev`);
   const roundNext = document.getElementById(`${prefix}-round-next`);
 
+  datePrev.addEventListener("click", () => stepDate(prefix, -1));
+  dateNext.addEventListener("click", () => stepDate(prefix, 1));
   dateInput.addEventListener("change", () => {
     state[`${prefix}DateFilter`] = dateInput.value;
     dateClear.hidden = !dateInput.value;
