@@ -700,7 +700,7 @@
     </div>
   </section>
 
-  <section class="panel" data-tab="ai-fpl">
+  <section class="panel" data-tab="ai-fpl" hidden>
     <div class="ai-fpl-actions">
       <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
       <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
@@ -755,6 +755,9 @@ const CONFIG = {
   // Transfers buttons on the AI FPL tab - set once that's deployed (see
   // doGet's action= dispatch).
   aiFplScriptUrl: "https://script.google.com/macros/s/AKfycbyLdzAeZxyh9o-2lrOFa72fKZnMujGDTw_qqNnHknkIdZsfJdt7sLBuCQYv9H03c6Qn/exec",
+  // Client-side access gate for the private AI FPL tab. This prompts for a
+  // passcode and skips the AIXI/API reads unless the browser is unlocked.
+  aiFplAccessHash: "a64332fe1df1790cb79d428bf5b5767ddd589b1cca825cb1b9eb30f7e9aaee03",
   resultsCount: 15,
 };
 // -------------------------------------------------------------------
@@ -764,6 +767,7 @@ const CONFIG = {
 // a manual Refresh afterward must not silently reset whatever filter/date/
 // round the user has since chosen.
 let initialDefaultsApplied = false;
+let aiFplAccessUnlocked = false;
 
 const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
@@ -782,6 +786,73 @@ const state = {
   fixtureDateFilter: "", resultDateFilter: "",
   fixtureRoundFilter: "", resultRoundFilter: "",
 };
+
+const AI_FPL_ACCESS_STORAGE_KEY = "matchlabAiFplAccess";
+
+async function sha256Hex(text) {
+  if (!globalThis.crypto?.subtle) return "";
+  const bytes = new TextEncoder().encode(text);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function setAiFplAccessUi(unlocked) {
+  const tab = document.querySelector('nav.tabs button[data-tab="ai-fpl"]');
+  const panel = document.querySelector('.panel[data-tab="ai-fpl"]');
+  if (!tab || !panel) return;
+  tab.hidden = false;
+  panel.hidden = !unlocked;
+  if (!unlocked && panel.dataset.active === "true") {
+    tab.setAttribute("aria-selected", "false");
+    const fixturesTab = document.querySelector('nav.tabs button[data-tab="fixtures"]');
+    const fixturesPanel = document.querySelector('.panel[data-tab="fixtures"]');
+    fixturesTab?.setAttribute("aria-selected", "true");
+    if (fixturesPanel) fixturesPanel.dataset.active = "true";
+    panel.dataset.active = "false";
+  }
+}
+
+function activateTab(tabName) {
+  document.querySelectorAll("nav.tabs button").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.tab === tabName));
+  });
+  document.querySelectorAll(".panel").forEach((p) => {
+    p.dataset.active = String(p.dataset.tab === tabName);
+  });
+}
+
+async function requestAiFplAccess() {
+  const passcode = window.prompt("Enter AI FPL passcode");
+  if (!passcode) return false;
+  const hash = await sha256Hex(passcode.trim());
+  if (hash !== CONFIG.aiFplAccessHash) {
+    window.alert("Incorrect passcode");
+    return false;
+  }
+  localStorage.setItem(AI_FPL_ACCESS_STORAGE_KEY, "unlocked");
+  aiFplAccessUnlocked = true;
+  setAiFplAccessUi(true);
+  return true;
+}
+
+async function initAiFplAccess() {
+  const url = new URL(window.location.href);
+  const accessCode = url.searchParams.get("aifpl");
+  if (accessCode === "lock") {
+    localStorage.removeItem(AI_FPL_ACCESS_STORAGE_KEY);
+    url.searchParams.delete("aifpl");
+    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  } else if (accessCode) {
+    const hash = await sha256Hex(accessCode);
+    if (hash === CONFIG.aiFplAccessHash) {
+      localStorage.setItem(AI_FPL_ACCESS_STORAGE_KEY, "unlocked");
+    }
+    url.searchParams.delete("aifpl");
+    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  aiFplAccessUnlocked = localStorage.getItem(AI_FPL_ACCESS_STORAGE_KEY) === "unlocked";
+  setAiFplAccessUi(aiFplAccessUnlocked);
+}
 
 const LINEUP_POSITIONS = ["GK","LB","CB","RB","DM","LWB","RWB","LM","CM","RM","LW","AM","RW","ST"];
 // Groups positions into pitch "lines", ordered GK -> ST. Rendered as columns
@@ -2294,7 +2365,10 @@ async function loadData() {
         state.lineupsByClub = buildLineupsByClub(lineups);
       })
       .catch((err) => console.error(err)),
-    fetchWithRetry(() => fetchSheetValues(CONFIG.aiFplTabName).then((v) => sheetRowsRaw(v)), "AI FPL")
+  ];
+
+  if (aiFplAccessUnlocked) {
+    tasks.push(fetchWithRetry(() => fetchSheetValues(CONFIG.aiFplTabName).then((v) => sheetRowsRaw(v)), "AI FPL")
       .then((rows) => {
         state.aiFpl = parseAiFplBlocks(rows);
         state.aiFplTransfers = parseAiFplTransfers(rows);
@@ -2305,8 +2379,8 @@ async function loadData() {
         console.error(err);
         showLoadErrorCard(document.getElementById("ai-fpl-list"), "the AI FPL squad");
         throw err;
-      }),
-  ];
+      }));
+  }
 
   const results = await Promise.allSettled(tasks);
   const failedCount = results.filter((r) => r.status === "rejected").length;
@@ -2319,11 +2393,14 @@ async function loadData() {
 }
 
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", "false"));
-    btn.setAttribute("aria-selected", "true");
+  btn.addEventListener("click", async () => {
     const tab = btn.dataset.tab;
-    document.querySelectorAll(".panel").forEach((p) => p.dataset.active = String(p.dataset.tab === tab));
+    if (tab === "ai-fpl" && !aiFplAccessUnlocked) {
+      const unlocked = await requestAiFplAccess();
+      if (!unlocked) return;
+      await loadData();
+    }
+    activateTab(tab);
   });
 });
 
@@ -2484,6 +2561,10 @@ document.getElementById("results-list").addEventListener("click", (e) => {
 // around), so this can take a couple of minutes - the button just waits.
 async function runAiFplAction(action, btn, label) {
   const statusEl = document.getElementById("ai-fpl-status");
+  if (!aiFplAccessUnlocked) {
+    statusEl.textContent = "AI FPL is locked.";
+    return;
+  }
   if (!CONFIG.aiFplScriptUrl) {
     statusEl.textContent = "Apps Script URL not configured yet.";
     return;
@@ -2514,7 +2595,7 @@ document.getElementById("ai-confirm-btn").addEventListener("click", (e) => {
   runAiFplAction("confirm_transfers", e.target, "Confirm Transfers");
 });
 
-loadData();
+initAiFplAccess().then(loadData);
 </script>
 </body>
 </html>
