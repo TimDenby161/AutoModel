@@ -772,6 +772,7 @@ const LEAGUE_FILTERS = {
   ucl: ["42"],
   el: ["73"],
   ecl: ["10216"],
+  caf: ["526"],
   eng: ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"],
 };
 
@@ -809,6 +810,7 @@ const COMPETITION_LABELS = {
   "10216": "Conference League",
   "525": "AFC Champions League Elite",
   "9469": "AFC Champions League Two",
+  "526": "CAF Champions League",
   "45": "Copa Libertadores",
   "299": "Copa Sudamericana",
 };
@@ -821,7 +823,8 @@ const FIXTURE_MOBILE_FILTER_LABELS = {
   "108": "L1",
   "109": "L2",
   "117": "NL",
-  "8944": "N/S",
+  "8944": "NLN/S",
+  "9084": "P2",
   "536": "SAU",
   "71": "TUR",
   "54": "GER",
@@ -829,15 +832,16 @@ const FIXTURE_MOBILE_FILTER_LABELS = {
   "87": "ESP",
   "55": "ITA",
   "42": "UCL",
-  "132": "FA Cup",
-  "133": "EFL Cup",
-  "142": "EFL Tr.",
+  "132": "FA",
+  "133": "EFL",
+  "142": "EFT",
   "73": "EL",
   "10216": "ECL",
-  "525": "ACL Elite",
-  "9469": "ACL Two",
-  "45": "Lib.",
-  "299": "Suda.",
+  "525": "ACL E",
+  "9469": "ACL 2",
+  "526": "CAF",
+  "45": "Lib",
+  "299": "Sud",
 };
 
 // Same English-competition set as LEAGUE_FILTERS.eng above, reused for the
@@ -1291,8 +1295,8 @@ const FIXTURE_PRIMARY_CHIP_ORDER = ["47", "42", "73", "10216", "48", "108", "109
 // the data that isn't listed here is appended after, most-active-first
 // (see buildCompetitionList), so a newly appearing competition is never
 // silently hidden.
-const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "42"];
-const FIXTURE_MORE_FIRST_ROW_COUNT = 6;
+const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "132", "133", "142", "8944", "9084", "45", "299", "525", "9469", "526"];
+const FIXTURE_MORE_ROW_BREAKS = [6, 11, 16];
 
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
@@ -1329,7 +1333,9 @@ function renderLeagueFilterChips(prefix) {
   ];
 
   const coveredIds = new Set([...primaryIds, "eng"]);
-  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) => present.has(id) && !coveredIds.has(id));
+  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) =>
+    !coveredIds.has(id) && (present.has(id) || (prefix === "fixture" && id === "526"))
+  );
   moreIdsOrdered.forEach((id) => coveredIds.add(id));
   const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
 
@@ -1337,8 +1343,12 @@ function renderLeagueFilterChips(prefix) {
     ...moreIdsOrdered.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
     ...moreRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
   ];
-  if (prefix === "fixture" && rest.length > FIXTURE_MORE_FIRST_ROW_COUNT) {
-    rest.splice(FIXTURE_MORE_FIRST_ROW_COUNT, 0, `<span class="filter-row-break" aria-hidden="true"></span>`);
+  if (prefix === "fixture") {
+    for (const breakIndex of [...FIXTURE_MORE_ROW_BREAKS].reverse()) {
+      if (rest.length > breakIndex) {
+        rest.splice(breakIndex, 0, `<span class="filter-row-break" aria-hidden="true"></span>`);
+      }
+    }
   }
 
   mainRow.innerHTML =
