@@ -258,7 +258,7 @@
   }
   .pens-tag {
     align-self: center; font-size: 10px; font-weight: 700;
-    color: var(--text-muted); margin-left: 2px; white-space: nowrap;
+    color: var(--text-muted); margin: 0 2px; white-space: nowrap;
   }
   .match-probs { margin-top: 8px; }
   .prob-bar {
@@ -1567,16 +1567,29 @@ function scoreAccuracyTier(m) {
   const gdError = Math.abs(actualGD - projGD);
   const gotWinnerRight = projResult === actualResult;
 
+  const sameShape = marginBucket(actualGD) === marginBucket(projGD);
+
   if (gotWinnerRight) {
     // Same "shape" of result (both close, or both a clear win) counts as
     // very accurate regardless of the exact numbers - but cap it with a
     // sanity ceiling so a wildly undersold blowout (e.g. proj by 1, actual
     // by 8) still falls back to "Fairly Good" instead of "Very Accurate".
-    const sameShape = marginBucket(actualGD) === marginBucket(projGD);
     return sameShape && gdError <= 3
       ? { cls: "acc-green", label: "Very Accurate" }
       : { cls: "acc-yellow", label: "Fairly Good" };
   }
+
+  // The strict winner call (H/A/D via probability argmax) missed - but if
+  // the model read this as a close, could-go-either-way game (its top
+  // probability wasn't a confident favorite) and the actual result was
+  // also close (a draw or a 1-goal game), that's still a good read of the
+  // match even though the argmax nominally leaned to the "wrong" side.
+  // A confidently wrong call (e.g. predicted a clear win for one side, the
+  // other side won clearly) does NOT get this leniency.
+  if (sameShape && marginBucket(actualGD) === "narrow") {
+    return { cls: "acc-yellow", label: "Fairly Good" };
+  }
+
   return gdError <= 1.5
     ? { cls: "acc-orange", label: "Not Good" }
     : { cls: "acc-red", label: "Awful" };
@@ -1585,13 +1598,20 @@ function scoreAccuracyTier(m) {
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
 // SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot. The main
 // score is the regulation-time result (see finalScore) with a "(pens)" tag
-// when the tie was actually decided on penalties.
+// on whichever side actually won the shootout - HomeS/AwayS is exactly the
+// goals-plus-penalties combined total (see finalScore's comment), so the
+// higher of the two raw values is the winning side.
 function finalScoreCenter(m) {
   const score = finalScore(m);
   const homeDisplay = score ? score.home : escapeHtml(m.HomeS);
   const awayDisplay = score ? score.away : escapeHtml(m.AwayS);
+  const pens = decidedOnPenalties(m);
+  const homeWonPens = pens && parseFloat(m.HomeS) > parseFloat(m.AwayS);
+  const awayWonPens = pens && parseFloat(m.AwayS) > parseFloat(m.HomeS);
+  const pensTag = '<span class="pens-tag">(pens)</span>';
   return `
     <div class="match-score has-proj">
+      ${homeWonPens ? pensTag : ""}
       <div class="score-col">
         <span class="proj-box">${homeDisplay}</span>
         ${projScoreSub(m.SnapProjH)}
@@ -1601,7 +1621,7 @@ function finalScoreCenter(m) {
         <span class="proj-box">${awayDisplay}</span>
         ${projScoreSub(m.SnapProjA)}
       </div>
-      ${decidedOnPenalties(m) ? '<span class="pens-tag">(pens)</span>' : ""}
+      ${awayWonPens ? pensTag : ""}
     </div>
   `;
 }
