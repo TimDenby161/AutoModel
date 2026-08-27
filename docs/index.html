@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AutoModel Data</title>
+<title>PitchDeck</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#2a78d6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="AutoModel">
+<meta name="apple-mobile-web-app-title" content="PitchDeck">
 <style>
   :root {
     color-scheme: light;
@@ -79,26 +79,45 @@
     position: sticky; top: 0; z-index: 10;
     background: var(--surface-1);
     border-bottom: 1px solid var(--border);
-    padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+    padding: calc(env(safe-area-inset-top) + 8px) 14px 8px;
+  }
+  .app-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
   }
   header h1 {
-    margin: 0 0 2px;
-    font-size: 20px;
-    font-weight: 700;
+    display: inline-flex; align-items: center; gap: 7px;
+    margin: 0;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+  .brand-mark {
+    width: 20px; height: 20px; border-radius: 6px;
+    background:
+      linear-gradient(135deg, var(--series-blue) 0 48%, transparent 48% 52%, var(--series-orange) 52%),
+      var(--series-aqua);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22);
   }
   .meta-row {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: flex-end;
     gap: 8px;
+    min-width: 0;
   }
   #status-line {
     font-size: 12px;
     color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #refresh-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-primary); border-radius: 8px; padding: 6px 12px;
     font-size: 13px; font-weight: 600; font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center;
   }
+  .refresh-icon { display: none; font-size: 15px; line-height: 1; }
   #refresh-btn:active { opacity: 0.7; }
   #refresh-btn[data-loading="true"] { opacity: 0.5; pointer-events: none; }
 
@@ -107,7 +126,7 @@
     background: var(--chip-bg);
     border-radius: 10px;
     padding: 3px;
-    margin-top: 12px;
+    margin-top: 8px;
   }
   nav.tabs button {
     flex: 1; appearance: none; border: none; background: transparent;
@@ -334,6 +353,22 @@
   #table-view-toggle { margin-bottom: 10px; }
 
   @media (max-width: 480px) {
+    header { padding: calc(env(safe-area-inset-top) + 6px) 10px 7px; }
+    .app-bar { gap: 8px; }
+    header h1 { font-size: 16px; gap: 6px; }
+    .brand-mark { width: 18px; height: 18px; border-radius: 5px; }
+    nav.tabs { margin-top: 7px; }
+    #status-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #refresh-btn {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border-radius: 50%;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    #refresh-btn .refresh-text { display: none; }
+    #refresh-btn .refresh-icon { display: inline; }
     .secondary-filters { flex-direction: column; align-items: stretch; }
     .date-filter-group, .round-filter-group { width: 100%; }
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
@@ -527,10 +562,15 @@
 <body>
 
 <header>
-  <h1>AutoModel Data</h1>
-  <div class="meta-row">
-    <span id="status-line">Loading&hellip;</span>
-    <button id="refresh-btn" type="button">Refresh</button>
+  <div class="app-bar">
+    <h1><span class="brand-mark" aria-hidden="true"></span><span>PitchDeck</span></h1>
+    <div class="meta-row">
+      <span id="status-line">Loading&hellip;</span>
+      <button id="refresh-btn" type="button" aria-label="Refresh data" title="Refresh data">
+        <span class="refresh-text">Refresh</span>
+        <span class="refresh-icon" aria-hidden="true">&#8635;</span>
+      </button>
+    </div>
   </div>
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
