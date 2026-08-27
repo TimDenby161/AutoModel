@@ -371,14 +371,17 @@
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
     .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
     #fixture-filters .filter-row,
-    #result-filters .filter-row { gap: 5px; }
+    #result-filters .filter-row,
+    #table-filters .filter-row { gap: 5px; }
     #fixture-filters .filter-row:first-child,
-    #result-filters .filter-row:first-child {
+    #result-filters .filter-row:first-child,
+    #table-filters .filter-row:first-child {
       flex-wrap: nowrap;
       gap: 3px;
     }
     #fixture-filters .filter-chip,
-    #result-filters .filter-chip {
+    #result-filters .filter-chip,
+    #table-filters .filter-chip {
       flex: 0 1 auto;
       min-width: 0;
       padding: 5px 6px;
@@ -386,7 +389,8 @@
       font-size: 11px;
     }
     #fixture-filters .filter-more,
-    #result-filters .filter-more {
+    #result-filters .filter-more,
+    #table-filters .filter-more {
       width: 26px;
       min-width: 26px;
       padding-inline: 0;
@@ -632,23 +636,21 @@
   <section class="panel" data-tab="table">
     <div class="filters-wrap" id="table-filters">
       <div class="filter-row">
-        <button type="button" class="filter-chip" data-filter="pl" aria-pressed="true">Prem</button>
-        <button type="button" class="filter-chip" data-filter="champ" aria-pressed="false">Championship</button>
-        <button type="button" class="filter-chip" data-filter="l1" aria-pressed="false">League One</button>
-        <button type="button" class="filter-chip" data-filter="l2" aria-pressed="false">League Two</button>
-        <button type="button" class="filter-chip" data-filter="nl" aria-pressed="false">National League</button>
-        <button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>
+        <button type="button" class="filter-chip" data-filter="pl" aria-label="Premier League" title="Premier League" aria-pressed="true">Prem</button>
+        <button type="button" class="filter-chip" data-filter="champ" aria-label="Championship" title="Championship" aria-pressed="false">Ch</button>
+        <button type="button" class="filter-chip" data-filter="l1" aria-label="League One" title="League One" aria-pressed="false">L1</button>
+        <button type="button" class="filter-chip" data-filter="l2" aria-label="League Two" title="League Two" aria-pressed="false">L2</button>
+        <button type="button" class="filter-chip" data-filter="nl" aria-label="National League" title="National League" aria-pressed="false">NL</button>
+        <button type="button" class="filter-chip filter-more" data-more-toggle aria-label="Show more leagues" title="Show more leagues" aria-expanded="false"><span class="filter-more-icon">&#9662;</span></button>
       </div>
       <div class="filter-row filter-row-more" hidden>
-        <button type="button" class="filter-chip" data-filter="bl" aria-pressed="false">Bundesliga</button>
-        <button type="button" class="filter-chip" data-filter="ll" aria-pressed="false">La Liga</button>
-        <button type="button" class="filter-chip" data-filter="seriea" aria-pressed="false">Serie A</button>
-        <button type="button" class="filter-chip" data-filter="fr" aria-pressed="false">Ligue 1</button>
-        <button type="button" class="filter-chip" data-filter="tur" aria-pressed="false">S&uuml;per Lig</button>
-        <button type="button" class="filter-chip" data-filter="sau" aria-pressed="false">Saudi</button>
-        <button type="button" class="filter-chip" data-filter="ucl" aria-pressed="false">UCL</button>
-        <button type="button" class="filter-chip" data-filter="el" aria-pressed="false">EL</button>
-        <button type="button" class="filter-chip" data-filter="ecl" aria-pressed="false">ECL</button>
+        <button type="button" class="filter-chip" data-filter="bl" aria-label="Bundesliga" title="Bundesliga" aria-pressed="false">GER</button>
+        <button type="button" class="filter-chip" data-filter="ll" aria-label="La Liga" title="La Liga" aria-pressed="false">ESP</button>
+        <button type="button" class="filter-chip" data-filter="seriea" aria-label="Serie A" title="Serie A" aria-pressed="false">ITA</button>
+        <button type="button" class="filter-chip" data-filter="fr" aria-label="Ligue 1" title="Ligue 1" aria-pressed="false">FRA</button>
+        <button type="button" class="filter-chip" data-filter="tur" aria-label="S&uuml;per Lig" title="S&uuml;per Lig" aria-pressed="false">TUR</button>
+        <button type="button" class="filter-chip" data-filter="sau" aria-label="Saudi Pro League" title="Saudi Pro League" aria-pressed="false">SAU</button>
+        <button type="button" class="filter-chip" data-filter="bra" aria-label="Brazilian League" title="Brazilian League" aria-pressed="false">BRA</button>
       </div>
     </div>
     <div class="filter-row" id="table-view-toggle">
