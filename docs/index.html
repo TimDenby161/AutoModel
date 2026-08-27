@@ -1489,9 +1489,13 @@ function projScoreSub(raw) {
   return `<div class="match-score-sub">${n.toFixed(1)}</div>`;
 }
 
-// How close the frozen pre-kickoff projection (SnapProjH/SnapProjA) landed
-// to the actual final score (HomeS/AwayS) - summed absolute goal error
-// across both teams, bucketed into 4 tiers.
+// How good the frozen pre-kickoff projection (SnapProjH/SnapProjA) turned
+// out to be, judged the way a person would read it: did it call the right
+// winner first, THEN how close was the margin - not raw goal-count error.
+// A 2.4-0.2 projection for a game that finished 5-1 is a good projection
+// (correctly called a comfortable home win) even though the exact numbers
+// are 3+ goals off; a projected home win for a game the away side won is a
+// bad projection even if the final margin was just 1 goal.
 function scoreAccuracy(m) {
   const actualH = parseFloat(m.HomeS);
   const actualA = parseFloat(m.AwayS);
@@ -1499,12 +1503,16 @@ function scoreAccuracy(m) {
   const projA = parseFloat(m.SnapProjA);
   if (![actualH, actualA, projH, projA].every(Number.isFinite)) return "";
 
-  const error = Math.abs(actualH - projH) + Math.abs(actualA - projA);
-  const tier =
-    error <= 0.75 ? { cls: "acc-green", label: "Very Accurate" } :
-    error <= 1.5 ? { cls: "acc-yellow", label: "Fairly Good" } :
-    error <= 2.5 ? { cls: "acc-orange", label: "Not Good" } :
-    { cls: "acc-red", label: "Awful" };
+  const actualGD = actualH - actualA;
+  const projGD = projH - projA;
+  const actualResult = actualGD > 0 ? "H" : actualGD < 0 ? "A" : "D";
+  const projResult = projGD > 0.25 ? "H" : projGD < -0.25 ? "A" : "D";
+  const gdError = Math.abs(actualGD - projGD);
+  const gotWinnerRight = projResult === actualResult;
+
+  const tier = gotWinnerRight
+    ? (gdError <= 1.5 ? { cls: "acc-green", label: "Very Accurate" } : { cls: "acc-yellow", label: "Fairly Good" })
+    : (gdError <= 1.5 ? { cls: "acc-orange", label: "Not Good" } : { cls: "acc-red", label: "Awful" });
 
   return `<div class="score-accuracy ${tier.cls}">${tier.label}</div>`;
 }
