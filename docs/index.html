@@ -776,8 +776,11 @@ const COMPETITION_LABELS = {
   "87": "La Liga",
   "55": "Serie A",
   "42": "Champions League",
+  "132": "FA Cup",
   "133": "EFL Cup",
   "142": "EFL Trophy",
+  "73": "Europa League",
+  "10216": "Conference League",
   "525": "AFC Champions League Elite",
   "9469": "AFC Champions League Two",
   "45": "Copa Libertadores",
@@ -1222,19 +1225,26 @@ function applyDefaultDateAndRound(prefix) {
 }
 
 // (Re)builds the league filter chips for a Fixtures/Results panel from
-// buildCompetitionList - "All" and "English Teams" are always pinned first,
-// then real competitions most-active-first, split across the visible row
-// and the "More" row the same way the old static markup did.
-// Fixed display order for the league chips - "All" is always first, then
-// this primary row (before "More"). Any of these not currently present in
-// the data (e.g. a competition with zero matches right now) is skipped
-// rather than shown as a dead filter.
-const PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "117", "eng"];
-// Curated order for the start of the "More" row - anything discovered in
-// the data that isn't listed here is appended after, most-active-first
-// (see buildCompetitionList), so a newly appearing competition is never
-// silently hidden.
-const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "42"];
+// buildCompetitionList - "All" is always first, then this fixed curated
+// order for both the visible row and the "More" row. Any entry not
+// currently present in the data (e.g. a competition with zero matches
+// right now) is skipped rather than shown as a dead filter.
+// Domestic pyramid + major English/European cups first, then the rest of
+// Europe, then National League and anything not explicitly listed
+// (inserted at "__unlisted__", most-active-first - see buildCompetitionList
+// - so a newly appearing competition is never silently hidden), with
+// National League N/S and PL2 deliberately last.
+const CHIP_ORDER = [
+  "47", "eng", "42", "132", "133", "73", "10216",
+  "48", "108", "109", "142",
+  "54", "87", "55", "53", "71", "536",
+  "117",
+  "__unlisted__",
+  "8944", "9084",
+];
+// How many named chips (after "All") stay in the always-visible row before
+// the rest fall under "More" - keeps the same visible density as before.
+const PRIMARY_CHIP_COUNT = 6;
 
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
@@ -1248,21 +1258,21 @@ function renderLeagueFilterChips(prefix) {
     `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-pressed="${currentFilter === id}">${escapeHtml(label)}</button>`;
   const labelForId = (id) => COMPETITION_LABELS[id] || competitions.find((c) => c.id === id)?.label || id;
 
-  const primaryIds = PRIMARY_CHIP_ORDER.filter((id) => id === "eng" || present.has(id));
-  const primary = [
-    chip("all", "All"),
-    ...primaryIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id))),
-  ];
+  const listedIds = new Set(CHIP_ORDER.filter((id) => id !== "__unlisted__"));
+  const unlistedIds = competitions.filter((c) => !listedIds.has(c.id)).map((c) => c.id);
 
-  const coveredIds = new Set([...primaryIds, "eng"]);
-  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) => present.has(id) && !coveredIds.has(id));
-  moreIdsOrdered.forEach((id) => coveredIds.add(id));
-  const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
+  const orderedIds = [];
+  CHIP_ORDER.forEach((id) => {
+    if (id === "__unlisted__") {
+      orderedIds.push(...unlistedIds);
+    } else if (id === "eng" || present.has(id)) {
+      orderedIds.push(id);
+    }
+  });
 
-  const rest = [
-    ...moreIdsOrdered.map((id) => chip(id, labelForId(id))),
-    ...moreRest.map((c) => chip(c.id, c.label)),
-  ];
+  const namedChips = orderedIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id)));
+  const primary = [chip("all", "All"), ...namedChips.slice(0, PRIMARY_CHIP_COUNT)];
+  const rest = namedChips.slice(PRIMARY_CHIP_COUNT);
 
   mainRow.innerHTML =
     primary.join("") +
