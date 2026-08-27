@@ -252,6 +252,15 @@
     font-size: 11px; font-weight: 600; color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
+  .score-accuracy {
+    display: block; width: fit-content; margin: 6px auto 0;
+    padding: 2px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .score-accuracy.acc-green  { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); }
+  .score-accuracy.acc-yellow { background: color-mix(in srgb, var(--status-warning) 16%, transparent); color: var(--status-warning); }
+  .score-accuracy.acc-orange { background: color-mix(in srgb, var(--series-orange) 16%, transparent); color: var(--series-orange); }
+  .score-accuracy.acc-red    { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
   .match-probs { margin-top: 8px; }
   .prob-bar {
     display: flex; gap: 2px; height: 6px;
@@ -1015,7 +1024,7 @@ function clubScoreLabel(raw) {
   if (raw == null || String(raw).trim() === "") return "";
   const n = parseFloat(String(raw).replace(/,/g, ""));
   if (!Number.isFinite(n)) return "";
-  return `<div class="club-score">${n.toLocaleString()}</div>`;
+  return `<div class="club-score">${Math.round(n).toLocaleString()}</div>`;
 }
 
 function matchScoreCenter(m) {
@@ -1480,6 +1489,26 @@ function projScoreSub(raw) {
   return `<div class="match-score-sub">${n.toFixed(1)}</div>`;
 }
 
+// How close the frozen pre-kickoff projection (SnapProjH/SnapProjA) landed
+// to the actual final score (HomeS/AwayS) - summed absolute goal error
+// across both teams, bucketed into 4 tiers.
+function scoreAccuracy(m) {
+  const actualH = parseFloat(m.HomeS);
+  const actualA = parseFloat(m.AwayS);
+  const projH = parseFloat(m.SnapProjH);
+  const projA = parseFloat(m.SnapProjA);
+  if (![actualH, actualA, projH, projA].every(Number.isFinite)) return "";
+
+  const error = Math.abs(actualH - projH) + Math.abs(actualA - projA);
+  const tier =
+    error <= 0.75 ? { cls: "acc-green", label: "Very Accurate" } :
+    error <= 1.5 ? { cls: "acc-yellow", label: "Fairly Good" } :
+    error <= 2.5 ? { cls: "acc-orange", label: "Not Good" } :
+    { cls: "acc-red", label: "Awful" };
+
+  return `<div class="score-accuracy ${tier.cls}">${tier.label}</div>`;
+}
+
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
 // SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot.
 function finalScoreCenter(m) {
@@ -1536,6 +1565,7 @@ function renderResults() {
           ${clubScoreLabel(m.SnapAwayScr)}
         </div>
       </div>
+      ${scoreAccuracy(m)}
       ${matchProbsRowSnapshot(m)}
     </div>
   `);
