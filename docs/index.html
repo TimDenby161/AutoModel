@@ -287,6 +287,7 @@
   .filter-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .filter-row-more { margin-top: 6px; }
   .filter-row-more[hidden] { display: none; }
+  .filter-row-break { flex-basis: 100%; height: 0; }
   .filter-chip {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
@@ -821,12 +822,12 @@ const FIXTURE_MOBILE_FILTER_LABELS = {
   "109": "L2",
   "117": "NL",
   "8944": "N/S",
-  "536": "Saudi",
+  "536": "SAU",
   "71": "TUR",
-  "54": "BL",
-  "53": "Ligue 1",
-  "87": "LaLiga",
-  "55": "Serie A",
+  "54": "GER",
+  "53": "FRA",
+  "87": "ESP",
+  "55": "ITA",
   "42": "UCL",
   "132": "FA Cup",
   "133": "EFL Cup",
@@ -1291,6 +1292,7 @@ const FIXTURE_PRIMARY_CHIP_ORDER = ["47", "42", "73", "10216", "48", "108", "109
 // (see buildCompetitionList), so a newly appearing competition is never
 // silently hidden.
 const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "42"];
+const FIXTURE_MORE_FIRST_ROW_COUNT = 6;
 
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
@@ -1335,6 +1337,9 @@ function renderLeagueFilterChips(prefix) {
     ...moreIdsOrdered.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
     ...moreRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
   ];
+  if (prefix === "fixture" && rest.length > FIXTURE_MORE_FIRST_ROW_COUNT) {
+    rest.splice(FIXTURE_MORE_FIRST_ROW_COUNT, 0, `<span class="filter-row-break" aria-hidden="true"></span>`);
+  }
 
   mainRow.innerHTML =
     primary.join("") +
