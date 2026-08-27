@@ -399,6 +399,12 @@
     #result-filters .filter-label-full.has-short { display: none; }
     #fixture-filters .filter-label-short,
     #result-filters .filter-label-short { display: inline; }
+    #table-filters .filter-row:first-child { gap: 2px; }
+    #table-filters .filter-chip {
+      padding: 5px 4px;
+      font-size: 10px;
+      flex: 1 1 0;
+    }
   }
 
   .search-row { margin-bottom: 10px; }
@@ -641,9 +647,6 @@
         <button type="button" class="filter-chip" data-filter="l1" aria-label="League One" title="League One" aria-pressed="false">L1</button>
         <button type="button" class="filter-chip" data-filter="l2" aria-label="League Two" title="League Two" aria-pressed="false">L2</button>
         <button type="button" class="filter-chip" data-filter="nl" aria-label="National League" title="National League" aria-pressed="false">NL</button>
-        <button type="button" class="filter-chip filter-more" data-more-toggle aria-label="Show more leagues" title="Show more leagues" aria-expanded="false"><span class="filter-more-icon">&#9662;</span></button>
-      </div>
-      <div class="filter-row filter-row-more" hidden>
         <button type="button" class="filter-chip" data-filter="bl" aria-label="Bundesliga" title="Bundesliga" aria-pressed="false">GER</button>
         <button type="button" class="filter-chip" data-filter="ll" aria-label="La Liga" title="La Liga" aria-pressed="false">ESP</button>
         <button type="button" class="filter-chip" data-filter="seriea" aria-label="Serie A" title="Serie A" aria-pressed="false">ITA</button>
@@ -2422,6 +2425,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
 function wireMoreToggle(wrap) {
   const toggle = wrap.querySelector("[data-more-toggle]");
   const moreRow = wrap.querySelector(".filter-row-more");
+  if (!toggle || !moreRow) return;
   toggle.addEventListener("click", () => {
     const expanded = toggle.getAttribute("aria-expanded") === "true";
     const nextExpanded = !expanded;
