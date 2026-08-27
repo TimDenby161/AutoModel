@@ -115,7 +115,7 @@ CLUB_LAST_FORMULA_COLUMN = "CP"  # every column B..CP looks up ClubData by ID
 MATCHES_WORKSHEET = "Matches"
 MATCHES_HEADER_ROW = 1
 MATCHES_DATA_START_ROW = 2
-MATCHES_LAST_FORMULA_COLUMN = "AX"  # every column B..AX looks up/derives from MatchData by ID
+MATCHES_LAST_FORMULA_COLUMN = "AZ"  # every column B..AZ looks up/derives from MatchData by ID
 
 INDIVIDUAL_RESULTS_SPREADSHEET_ID = "1y2L7pOfIHqBMQCYsMy3g1Cm1iHCl3aR6onIpMWzWa1A"
 INDIVIDUAL_RESULTS_WORKSHEET = "Individual Results"
