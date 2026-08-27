@@ -336,6 +336,7 @@
     color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
     padding: 6px 10px; border-radius: 20px;
   }
+  .round-filter-select { text-align: center; text-align-last: center; }
   .round-filter-select:disabled { opacity: 0.5; }
   .round-filter-group { display: flex; align-items: center; justify-content: center; gap: 4px; }
   .round-nav-btn, .date-nav-btn {
@@ -369,25 +370,31 @@
     .date-filter-group, .round-filter-group { width: 100%; }
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
     .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
-    #fixture-filters .filter-row { gap: 5px; }
-    #fixture-filters .filter-row:first-child {
+    #fixture-filters .filter-row,
+    #result-filters .filter-row { gap: 5px; }
+    #fixture-filters .filter-row:first-child,
+    #result-filters .filter-row:first-child {
       flex-wrap: nowrap;
       gap: 3px;
     }
-    #fixture-filters .filter-chip {
+    #fixture-filters .filter-chip,
+    #result-filters .filter-chip {
       flex: 0 1 auto;
       min-width: 0;
       padding: 5px 6px;
       text-align: center;
       font-size: 11px;
     }
-    #fixture-filters .filter-more {
+    #fixture-filters .filter-more,
+    #result-filters .filter-more {
       width: 26px;
       min-width: 26px;
       padding-inline: 0;
     }
-    #fixture-filters .filter-label-full.has-short { display: none; }
-    #fixture-filters .filter-label-short { display: inline; }
+    #fixture-filters .filter-label-full.has-short,
+    #result-filters .filter-label-full.has-short { display: none; }
+    #fixture-filters .filter-label-short,
+    #result-filters .filter-label-short { display: inline; }
   }
 
   .search-row { margin-bottom: 10px; }
@@ -1411,7 +1418,6 @@ function updateSecondaryFilterVisibility(prefix) {
 // this primary row (before "More"). Any of these not currently present in
 // the data (e.g. a competition with zero matches right now) is skipped
 // rather than shown as a dead filter.
-const PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "117", "eng"];
 const FIXTURE_PRIMARY_CHIP_ORDER = ["47", "42", "73", "10216", "48", "108", "109", "117", "eng"];
 // Curated order for the start of the "More" row - anything discovered in
 // the data that isn't listed here is appended after, most-active-first
@@ -1433,7 +1439,7 @@ function renderLeagueFilterChips(prefix) {
   const present = new Set(competitions.map((c) => c.id));
 
   const chip = (id, label, fullLabel = label, shortLabel = label) => {
-    const hasShort = prefix === "fixture" && shortLabel !== label;
+    const hasShort = (prefix === "fixture" || prefix === "result") && shortLabel !== label;
     const labelHtml = hasShort
       ? `<span class="filter-label-full has-short">${escapeHtml(label)}</span><span class="filter-label-short">${escapeHtml(shortLabel)}</span>`
       : escapeHtml(label);
@@ -1442,9 +1448,9 @@ function renderLeagueFilterChips(prefix) {
   const labelForId = (id) => COMPETITION_LABELS[id] || competitions.find((c) => c.id === id)?.label || id;
   const shortLabelForId = (id) => FIXTURE_MOBILE_FILTER_LABELS[id] || labelForId(id);
 
-  const primaryOrder = prefix === "fixture" ? FIXTURE_PRIMARY_CHIP_ORDER : PRIMARY_CHIP_ORDER;
+  const primaryOrder = FIXTURE_PRIMARY_CHIP_ORDER;
   const primaryIds = primaryOrder.filter((id) =>
-    id === "eng" || prefix === "fixture" || present.has(id)
+    id === "eng" || prefix === "fixture" || prefix === "result" || present.has(id)
   );
   const primary = [
     chip("all", "All", "All", shortLabelForId("all")),
@@ -1460,7 +1466,7 @@ function renderLeagueFilterChips(prefix) {
 
   const coveredIds = new Set([...primaryIds, "eng"]);
   let rest;
-  if (prefix === "fixture") {
+  if (prefix === "fixture" || prefix === "result") {
     const fixtureMoreIds = new Set(FIXTURE_MORE_ROW_GROUPS.flat());
     fixtureMoreIds.forEach((id) => coveredIds.add(id));
     const fixtureRest = competitions.filter((c) => !coveredIds.has(c.id));
