@@ -209,7 +209,7 @@
     display: flex; align-items: center; gap: 6px;
     font-size: 12px; font-weight: 700; color: var(--text-secondary);
     text-transform: uppercase; letter-spacing: 0.03em;
-    padding-bottom: 4px; margin-bottom: 8px;
+    padding: 8px 0; margin-bottom: 6px;
     border-bottom: 1px solid var(--border);
     cursor: pointer; user-select: none;
   }
@@ -220,7 +220,7 @@
   }
   .comp-group-name {
     appearance: none; border: none; background: transparent; padding: 0;
-    flex: 1; min-width: 0; text-align: left;
+    flex: 0 1 auto; min-width: 0; max-width: 100%; margin-right: auto; text-align: left;
     font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
     cursor: pointer;
   }
@@ -345,11 +345,6 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
-  .date-filter-clear {
-    appearance: none; border: none; background: transparent; color: var(--text-muted);
-    font-size: 16px; line-height: 1; padding: 2px 8px; cursor: pointer;
-  }
-  .date-filter-clear[hidden] { display: none; }
   #table-view-toggle { margin-bottom: 10px; }
 
   @media (max-width: 480px) {
@@ -592,9 +587,8 @@
         <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
         <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
         <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
-        <button type="button" class="date-filter-clear" id="fixture-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
-      <div class="round-filter-group">
+      <div class="round-filter-group" hidden>
         <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
         <select id="fixture-round-filter" class="round-filter-select" disabled>
           <option value="">Select a league for rounds</option>
@@ -615,9 +609,8 @@
         <button type="button" class="date-nav-btn" id="result-date-prev" aria-label="Previous day">&#8249;</button>
         <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
         <button type="button" class="date-nav-btn" id="result-date-next" aria-label="Next day">&#8250;</button>
-        <button type="button" class="date-filter-clear" id="result-date-clear" hidden aria-label="Clear date filter">&times;</button>
       </div>
-      <div class="round-filter-group">
+      <div class="round-filter-group" hidden>
         <button type="button" class="round-nav-btn" id="result-round-prev" aria-label="Previous round" disabled>&#8249;</button>
         <select id="result-round-filter" class="round-filter-select" disabled>
           <option value="">Select a league for rounds</option>
@@ -1382,7 +1375,6 @@ function defaultRoundFor(prefix, filterValue) {
 function applyDefaultDateAndRound(prefix) {
   const filterValue = state[`${prefix}Filter`];
   const dateInput = document.getElementById(`${prefix}-date-filter`);
-  const dateClear = document.getElementById(`${prefix}-date-clear`);
 
   if (isSingleCompetitionFilter(filterValue)) {
     state[`${prefix}DateFilter`] = "";
@@ -1392,7 +1384,15 @@ function applyDefaultDateAndRound(prefix) {
     state[`${prefix}RoundFilter`] = "";
   }
   dateInput.value = state[`${prefix}DateFilter`];
-  dateClear.hidden = !state[`${prefix}DateFilter`];
+  updateSecondaryFilterVisibility(prefix);
+}
+
+function updateSecondaryFilterVisibility(prefix) {
+  const dateGroup = document.querySelector(`#${prefix}-date-filter`)?.closest(".date-filter-group");
+  const roundGroup = document.querySelector(`#${prefix}-round-filter`)?.closest(".round-filter-group");
+  const showRound = isSingleCompetitionFilter(state[`${prefix}Filter`]);
+  if (dateGroup) dateGroup.hidden = showRound;
+  if (roundGroup) roundGroup.hidden = !showRound;
 }
 
 // (Re)builds the league filter chips for a Fixtures/Results panel from
@@ -1600,7 +1600,6 @@ function stepDate(prefix, direction) {
 
   state[`${prefix}DateFilter`] = newDateStr;
   document.getElementById(`${prefix}-date-filter`).value = newDateStr;
-  document.getElementById(`${prefix}-date-clear`).hidden = false;
   (prefix === "fixture" ? renderFixtures : renderResults)();
 }
 
@@ -2439,7 +2438,6 @@ document.getElementById("result-filters").addEventListener("click", (e) => {
 
 function wireDateRoundFilters(prefix, renderFn) {
   const dateInput = document.getElementById(`${prefix}-date-filter`);
-  const dateClear = document.getElementById(`${prefix}-date-clear`);
   const datePrev = document.getElementById(`${prefix}-date-prev`);
   const dateNext = document.getElementById(`${prefix}-date-next`);
   const roundSelect = document.getElementById(`${prefix}-round-filter`);
@@ -2450,13 +2448,6 @@ function wireDateRoundFilters(prefix, renderFn) {
   dateNext.addEventListener("click", () => stepDate(prefix, 1));
   dateInput.addEventListener("change", () => {
     state[`${prefix}DateFilter`] = dateInput.value;
-    dateClear.hidden = !dateInput.value;
-    renderFn();
-  });
-  dateClear.addEventListener("click", () => {
-    dateInput.value = "";
-    state[`${prefix}DateFilter`] = "";
-    dateClear.hidden = true;
     renderFn();
   });
   roundSelect.addEventListener("change", () => {
