@@ -64,6 +64,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 import threading
 import time
@@ -773,6 +774,21 @@ def load_alt_names(spreadsheet) -> dict[str, str]:
     return mapping
 
 
+SCORE_TEXT_RE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
+
+
+def regulation_score(score_text: Any, home_score: Any, away_score: Any) -> tuple[Any, Any]:
+    """For a match decided on penalties, FotMob's Home/Away Score fields
+    report goals-plus-shootout-penalties combined (e.g. a 1-1 draw River
+    Plate lost 7-8 on pens comes back as 8-9), not a real scoreline - the
+    Score/scoreStr text ("1 - 1") is the genuine regulation-time result.
+    Falls back to Home/Away Score only when Score isn't a parseable "H - A"."""
+    match = SCORE_TEXT_RE.match(str(score_text or ""))
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return home_score, away_score
+
+
 def individual_results_rows_from_matches(
     spreadsheet, all_matches: dict[str, dict[str, Any]]
 ) -> list[tuple[Any, Any, Any, Any, Any]]:
@@ -788,12 +804,15 @@ def individual_results_rows_from_matches(
             continue
         home = str(row.get("Home Club", "") or "")
         away = str(row.get("Away Club", "") or "")
+        home_score, away_score = regulation_score(
+            row.get("Score", ""), row.get("Home Score", ""), row.get("Away Score", "")
+        )
         rows.append((
             row.get("Match UTC", ""),
             alt_names.get(home, home),
             alt_names.get(away, away),
-            row.get("Home Score", ""),
-            row.get("Away Score", ""),
+            home_score,
+            away_score,
         ))
     return rows
 
@@ -809,7 +828,9 @@ def individual_results_rows_from_sheet(
     source_matchdata = spreadsheet.worksheet(args.match_worksheet)
 
     matches_values = sheet_call(
-        lambda: source_matches.get("A:Q", value_render_option="FORMATTED_VALUE"),
+        # A:AZ (not just A:Q) so column AY (Score) is available for
+        # regulation_score() to prefer over the penalty-inflated HomeS/AwayS.
+        lambda: source_matches.get("A:AZ", value_render_option="FORMATTED_VALUE"),
         description="Read Matches tab for Individual Results",
     )
     matchdata_values = read_existing_values(
@@ -833,12 +854,17 @@ def individual_results_rows_from_sheet(
         match_id = normalize_sheet_value(value_at(row, 0))
         if match_id not in finished_ids:
             continue
+        home_score, away_score = regulation_score(
+            value_at(row, 50),  # AY: Score
+            value_at(row, 15),  # P: HomeS
+            value_at(row, 16),  # Q: AwayS
+        )
         rows.append((
             value_at(row, 1),   # B: Date
             value_at(row, 11),  # L: HomeAlt
             value_at(row, 14),  # O: AwayAlt
-            value_at(row, 15),  # P: HomeS
-            value_at(row, 16),  # Q: AwayS
+            home_score,
+            away_score,
         ))
     return rows
 
