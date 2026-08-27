@@ -293,6 +293,7 @@
     padding: 6px 10px; border-radius: 20px;
     white-space: nowrap;
   }
+  .filter-label-short { display: none; }
   .filter-chip[aria-pressed="true"] {
     background: color-mix(in srgb, var(--series-blue) 16%, transparent);
     color: var(--series-blue); border-color: transparent;
@@ -331,6 +332,14 @@
     .date-filter-group, .round-filter-group { width: 100%; }
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
     .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
+    #fixture-filters .filter-row { gap: 5px; }
+    #fixture-filters .filter-chip {
+      min-width: 38px;
+      padding: 6px 8px;
+      text-align: center;
+    }
+    #fixture-filters .filter-label-full.has-short { display: none; }
+    #fixture-filters .filter-label-short { display: inline; }
   }
 
   .search-row { margin-bottom: 10px; }
@@ -787,6 +796,33 @@ const COMPETITION_LABELS = {
   "299": "Copa Sudamericana",
 };
 
+const FIXTURE_MOBILE_FILTER_LABELS = {
+  all: "All",
+  eng: "Eng",
+  "47": "Prem",
+  "48": "Champ",
+  "108": "L1",
+  "109": "L2",
+  "117": "NL",
+  "8944": "N/S",
+  "536": "Saudi",
+  "71": "TUR",
+  "54": "BL",
+  "53": "Ligue 1",
+  "87": "LaLiga",
+  "55": "Serie A",
+  "42": "UCL",
+  "132": "FA Cup",
+  "133": "EFL Cup",
+  "142": "EFL Tr.",
+  "73": "EL",
+  "10216": "ECL",
+  "525": "ACL Elite",
+  "9469": "ACL Two",
+  "45": "Lib.",
+  "299": "Suda.",
+};
+
 // Same English-competition set as LEAGUE_FILTERS.eng above, reused for the
 // Fixtures/Results "English Teams" chip.
 const ENGLISH_COMPETITION_IDS = ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"];
@@ -1233,6 +1269,7 @@ function applyDefaultDateAndRound(prefix) {
 // the data (e.g. a competition with zero matches right now) is skipped
 // rather than shown as a dead filter.
 const PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "117", "eng"];
+const FIXTURE_PRIMARY_CHIP_ORDER = ["47", "48", "108", "109", "eng", "117"];
 // Curated order for the start of the "More" row - anything discovered in
 // the data that isn't listed here is appended after, most-active-first
 // (see buildCompetitionList), so a newly appearing competition is never
@@ -1247,14 +1284,28 @@ function renderLeagueFilterChips(prefix) {
   const competitions = buildCompetitionList();
   const present = new Set(competitions.map((c) => c.id));
 
-  const chip = (id, label) =>
-    `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-pressed="${currentFilter === id}">${escapeHtml(label)}</button>`;
+  const chip = (id, label, fullLabel = label, shortLabel = label) => {
+    const hasShort = prefix === "fixture" && shortLabel !== label;
+    const labelHtml = hasShort
+      ? `<span class="filter-label-full has-short">${escapeHtml(label)}</span><span class="filter-label-short">${escapeHtml(shortLabel)}</span>`
+      : escapeHtml(label);
+    return `<button type="button" class="filter-chip" data-filter="${escapeHtml(id)}" aria-label="${escapeHtml(fullLabel)}" title="${escapeHtml(fullLabel)}" aria-pressed="${currentFilter === id}">${labelHtml}</button>`;
+  };
   const labelForId = (id) => COMPETITION_LABELS[id] || competitions.find((c) => c.id === id)?.label || id;
+  const shortLabelForId = (id) => FIXTURE_MOBILE_FILTER_LABELS[id] || labelForId(id);
 
-  const primaryIds = PRIMARY_CHIP_ORDER.filter((id) => id === "eng" || present.has(id));
+  const primaryOrder = prefix === "fixture" ? FIXTURE_PRIMARY_CHIP_ORDER : PRIMARY_CHIP_ORDER;
+  const primaryIds = primaryOrder.filter((id) => id === "eng" || present.has(id));
   const primary = [
-    chip("all", "All"),
-    ...primaryIds.map((id) => chip(id, id === "eng" ? "English Teams" : labelForId(id))),
+    chip("all", "All", "All", shortLabelForId("all")),
+    ...primaryIds.map((id) =>
+      chip(
+        id,
+        id === "eng" ? "English Teams" : labelForId(id),
+        id === "eng" ? "English Teams" : labelForId(id),
+        id === "eng" ? shortLabelForId("eng") : shortLabelForId(id)
+      )
+    ),
   ];
 
   const coveredIds = new Set([...primaryIds, "eng"]);
@@ -1263,8 +1314,8 @@ function renderLeagueFilterChips(prefix) {
   const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
 
   const rest = [
-    ...moreIdsOrdered.map((id) => chip(id, labelForId(id))),
-    ...moreRest.map((c) => chip(c.id, c.label)),
+    ...moreIdsOrdered.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
+    ...moreRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
   ];
 
   mainRow.innerHTML =
