@@ -333,14 +333,20 @@
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
     .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
     #fixture-filters .filter-row { gap: 5px; }
+    #fixture-filters .filter-row:first-child {
+      flex-wrap: nowrap;
+      gap: 3px;
+    }
     #fixture-filters .filter-chip {
-      min-width: 38px;
-      padding: 6px 8px;
+      flex: 0 1 auto;
+      min-width: 0;
+      padding: 5px 6px;
       text-align: center;
+      font-size: 11px;
     }
     #fixture-filters .filter-more {
-      width: 32px;
-      min-width: 32px;
+      width: 26px;
+      min-width: 26px;
       padding-inline: 0;
     }
     #fixture-filters .filter-label-full.has-short { display: none; }
@@ -805,7 +811,7 @@ const FIXTURE_MOBILE_FILTER_LABELS = {
   all: "All",
   eng: "Eng",
   "47": "Prem",
-  "48": "Champ",
+  "48": "Ch",
   "108": "L1",
   "109": "L2",
   "117": "NL",
