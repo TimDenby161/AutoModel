@@ -768,6 +768,7 @@ const LEAGUE_FILTERS = {
   seriea: ["55"],
   tur: ["71"],
   sau: ["536"],
+  bra: ["268"],
   fr: ["53"],
   ucl: ["42"],
   el: ["73"],
@@ -797,6 +798,7 @@ const COMPETITION_LABELS = {
   "8944": "Nat. League N/S",
   "9084": "PL2",
   "536": "Saudi Pro League",
+  "268": "Brasileirao",
   "71": "Süper Lig",
   "54": "Bundesliga",
   "53": "Ligue 1",
@@ -826,6 +828,7 @@ const FIXTURE_MOBILE_FILTER_LABELS = {
   "8944": "NLN/S",
   "9084": "P2",
   "536": "SAU",
+  "268": "BRA",
   "71": "TUR",
   "54": "GER",
   "53": "FRA",
@@ -1295,8 +1298,12 @@ const FIXTURE_PRIMARY_CHIP_ORDER = ["47", "42", "73", "10216", "48", "108", "109
 // the data that isn't listed here is appended after, most-active-first
 // (see buildCompetitionList), so a newly appearing competition is never
 // silently hidden.
-const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "132", "133", "142", "8944", "9084", "45", "299", "525", "9469", "526"];
-const FIXTURE_MORE_ROW_BREAKS = [6, 11, 16];
+const MORE_CHIP_ORDER = ["54", "87", "55", "53", "71", "536", "268", "132", "133", "142", "8944", "9084", "45", "299", "525", "9469", "526"];
+const FIXTURE_MORE_ROW_GROUPS = [
+  ["54", "87", "55", "53", "71", "536", "268"],
+  ["132", "133", "142", "8944", "9084"],
+  ["45", "299", "525", "9469", "526"],
+];
 
 function renderLeagueFilterChips(prefix) {
   const wrap = document.getElementById(`${prefix}-filters`);
@@ -1333,22 +1340,27 @@ function renderLeagueFilterChips(prefix) {
   ];
 
   const coveredIds = new Set([...primaryIds, "eng"]);
-  const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) =>
-    !coveredIds.has(id) && (present.has(id) || (prefix === "fixture" && id === "526"))
-  );
-  moreIdsOrdered.forEach((id) => coveredIds.add(id));
-  const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
-
-  const rest = [
-    ...moreIdsOrdered.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
-    ...moreRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
-  ];
+  let rest;
   if (prefix === "fixture") {
-    for (const breakIndex of [...FIXTURE_MORE_ROW_BREAKS].reverse()) {
-      if (rest.length > breakIndex) {
-        rest.splice(breakIndex, 0, `<span class="filter-row-break" aria-hidden="true"></span>`);
-      }
-    }
+    const fixtureMoreIds = new Set(FIXTURE_MORE_ROW_GROUPS.flat());
+    fixtureMoreIds.forEach((id) => coveredIds.add(id));
+    const fixtureRest = competitions.filter((c) => !coveredIds.has(c.id));
+    rest = [
+      ...FIXTURE_MORE_ROW_GROUPS.flatMap((group, index) => [
+        ...(index > 0 ? [`<span class="filter-row-break" aria-hidden="true"></span>`] : []),
+        ...group.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
+      ]),
+      ...(fixtureRest.length ? [`<span class="filter-row-break" aria-hidden="true"></span>`] : []),
+      ...fixtureRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
+    ];
+  } else {
+    const moreIdsOrdered = MORE_CHIP_ORDER.filter((id) => present.has(id) && !coveredIds.has(id));
+    moreIdsOrdered.forEach((id) => coveredIds.add(id));
+    const moreRest = competitions.filter((c) => !coveredIds.has(c.id));
+    rest = [
+      ...moreIdsOrdered.map((id) => chip(id, labelForId(id), labelForId(id), shortLabelForId(id))),
+      ...moreRest.map((c) => chip(c.id, c.label, c.label, shortLabelForId(c.id))),
+    ];
   }
 
   mainRow.innerHTML =
