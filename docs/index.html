@@ -133,6 +133,10 @@
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px; cursor: pointer;
   }
+  .match-card.acc-green  { background: color-mix(in srgb, var(--status-good) 10%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-good) 40%, var(--border)); }
+  .match-card.acc-yellow { background: color-mix(in srgb, var(--status-warning) 10%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-warning) 40%, var(--border)); }
+  .match-card.acc-orange { background: color-mix(in srgb, var(--series-orange) 10%, var(--surface-1)); border-color: color-mix(in srgb, var(--series-orange) 40%, var(--border)); }
+  .match-card.acc-red    { background: color-mix(in srgb, var(--status-critical) 10%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-critical) 40%, var(--border)); }
   .lineup-panel {
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
   }
@@ -1496,12 +1500,12 @@ function projScoreSub(raw) {
 // (correctly called a comfortable home win) even though the exact numbers
 // are 3+ goals off; a projected home win for a game the away side won is a
 // bad projection even if the final margin was just 1 goal.
-function scoreAccuracy(m) {
+function scoreAccuracyTier(m) {
   const actualH = parseFloat(m.HomeS);
   const actualA = parseFloat(m.AwayS);
   const projH = parseFloat(m.SnapProjH);
   const projA = parseFloat(m.SnapProjA);
-  if (![actualH, actualA, projH, projA].every(Number.isFinite)) return "";
+  if (![actualH, actualA, projH, projA].every(Number.isFinite)) return null;
 
   const actualGD = actualH - actualA;
   const projGD = projH - projA;
@@ -1510,10 +1514,14 @@ function scoreAccuracy(m) {
   const gdError = Math.abs(actualGD - projGD);
   const gotWinnerRight = projResult === actualResult;
 
-  const tier = gotWinnerRight
+  return gotWinnerRight
     ? (gdError <= 1.5 ? { cls: "acc-green", label: "Very Accurate" } : { cls: "acc-yellow", label: "Fairly Good" })
     : (gdError <= 1.5 ? { cls: "acc-orange", label: "Not Good" } : { cls: "acc-red", label: "Awful" });
+}
 
+function scoreAccuracy(m) {
+  const tier = scoreAccuracyTier(m);
+  if (!tier) return "";
   return `<div class="score-accuracy ${tier.cls}">${tier.label}</div>`;
 }
 
@@ -1557,8 +1565,10 @@ function renderResults() {
   }
 
   const groups = groupByCompetition(recent);
-  container.innerHTML = renderGroupedMatches(groups, state.collapsedResultGroups, (m) => `
-    <div class="match-card">
+  container.innerHTML = renderGroupedMatches(groups, state.collapsedResultGroups, (m) => {
+    const tier = scoreAccuracyTier(m);
+    return `
+    <div class="match-card${tier ? ` ${tier.cls}` : ""}">
       <div class="match-comp">
         <span>${escapeHtml(formatKickoff(m.Date))}</span>
       </div>
@@ -1576,7 +1586,8 @@ function renderResults() {
       ${scoreAccuracy(m)}
       ${matchProbsRowSnapshot(m)}
     </div>
-  `);
+  `;
+  });
 }
 
 // Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
