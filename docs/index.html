@@ -326,6 +326,13 @@
   .date-filter-clear[hidden] { display: none; }
   #table-view-toggle { margin-bottom: 10px; }
 
+  @media (max-width: 480px) {
+    .secondary-filters { flex-direction: column; align-items: stretch; }
+    .date-filter-group, .round-filter-group { width: 100%; }
+    .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
+    .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
+  }
+
   .search-row { margin-bottom: 10px; }
   .search-row input {
     width: 100%; padding: 10px 12px; border-radius: 8px;
