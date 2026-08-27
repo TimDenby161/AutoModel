@@ -338,6 +338,11 @@
       padding: 6px 8px;
       text-align: center;
     }
+    #fixture-filters .filter-more {
+      width: 32px;
+      min-width: 32px;
+      padding-inline: 0;
+    }
     #fixture-filters .filter-label-full.has-short { display: none; }
     #fixture-filters .filter-label-short { display: inline; }
   }
@@ -1320,7 +1325,7 @@ function renderLeagueFilterChips(prefix) {
 
   mainRow.innerHTML =
     primary.join("") +
-    `<button type="button" class="filter-chip filter-more" data-more-toggle aria-expanded="false">More &#9662;</button>`;
+    `<button type="button" class="filter-chip filter-more" data-more-toggle aria-label="Show more leagues" title="Show more leagues" aria-expanded="false"><span class="filter-label-full">More &#9662;</span><span class="filter-label-short">&#9662;</span></button>`;
   moreRow.innerHTML = rest.join("");
   moreRow.hidden = true;
   wireMoreToggle(wrap);
@@ -1340,7 +1345,9 @@ function selectLeagueFilter(prefix, filterValue) {
     const toggle = wrap.querySelector("[data-more-toggle]");
     moreRow.hidden = false;
     toggle.setAttribute("aria-expanded", "true");
-    toggle.innerHTML = "Less &#9652;";
+    toggle.setAttribute("aria-label", "Show fewer leagues");
+    toggle.setAttribute("title", "Show fewer leagues");
+    toggle.innerHTML = `<span class="filter-label-full">Less &#9652;</span><span class="filter-label-short">&#9652;</span>`;
   }
 
   state[`${prefix}Filter`] = filterValue;
@@ -2245,9 +2252,14 @@ function wireMoreToggle(wrap) {
   const moreRow = wrap.querySelector(".filter-row-more");
   toggle.addEventListener("click", () => {
     const expanded = toggle.getAttribute("aria-expanded") === "true";
+    const nextExpanded = !expanded;
     toggle.setAttribute("aria-expanded", String(!expanded));
     moreRow.hidden = expanded;
-    toggle.innerHTML = expanded ? "More &#9662;" : "Less &#9652;";
+    toggle.setAttribute("aria-label", nextExpanded ? "Show fewer leagues" : "Show more leagues");
+    toggle.setAttribute("title", nextExpanded ? "Show fewer leagues" : "Show more leagues");
+    toggle.innerHTML = nextExpanded
+      ? `<span class="filter-label-full">Less &#9652;</span><span class="filter-label-short">&#9652;</span>`
+      : `<span class="filter-label-full">More &#9662;</span><span class="filter-label-short">&#9662;</span>`;
   });
 }
 wireMoreToggle(document.getElementById("table-filters"));
