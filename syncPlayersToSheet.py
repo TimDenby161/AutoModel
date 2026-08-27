@@ -1393,13 +1393,16 @@ def sync_matches(
         sheet_call(lambda: worksheet.update([gmatch.HEADERS]), description="Write MatchData header")
         existing_values = [gmatch.HEADERS]
 
-    if existing_values[0] != gmatch.HEADERS:
+    header_len = len(gmatch.HEADERS)
+    # Only the first header_len columns are getMatches.py's own layout - the
+    # snapshot columns (SnapProjH etc., written by snapshot_pre_match_projections)
+    # live past that and are allowed to trail without failing this check.
+    if existing_values[0][:header_len] != gmatch.HEADERS:
         raise SystemExit(
             "MatchData's header row doesn't match getMatches.py's current "
             "HEADERS layout. Clear the sheet or fix the header before syncing."
         )
 
-    header_len = len(gmatch.HEADERS)
     match_id_col = gmatch.HEADERS.index("Match ID")
     match_utc_col = gmatch.HEADERS.index("Match UTC")
 
