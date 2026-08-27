@@ -1,6 +1,6 @@
 {
-  "name": "AutoModel Data Dashboard",
-  "short_name": "AutoModel",
+  "name": "MatchLab",
+  "short_name": "MatchLab",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0d0d0d",
