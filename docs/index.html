@@ -1527,12 +1527,19 @@ function scoreAccuracyTier(m) {
   const actualA = actual ? actual.away : NaN;
   const projH = parseFloat(m.SnapProjH);
   const projA = parseFloat(m.SnapProjA);
-  if (![actualH, actualA, projH, projA].every(Number.isFinite)) return null;
+  const hw = parseFloat(m.SnapHomeWinPct);
+  const draw = parseFloat(m.SnapDrawPct);
+  const aw = parseFloat(m.SnapAwayWinPct);
+  if (![actualH, actualA, projH, projA, hw, draw, aw].every(Number.isFinite)) return null;
 
   const actualGD = actualH - actualA;
   const projGD = projH - projA;
   const actualResult = actualGD > 0 ? "H" : actualGD < 0 ? "A" : "D";
-  const projResult = projGD > 0.25 ? "H" : projGD < -0.25 ? "A" : "D";
+  // The model's own most-likely outcome (highest of its win/draw/away
+  // probabilities), not a threshold on the projected score's goal
+  // difference - a near-even scoreline (e.g. 1.6-1.4) can still imply a
+  // clear favorite once the draw probability is factored in (41/24/35).
+  const projResult = hw >= draw && hw >= aw ? "H" : aw >= draw ? "A" : "D";
   const gdError = Math.abs(actualGD - projGD);
   const gotWinnerRight = projResult === actualResult;
 
