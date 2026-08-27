@@ -330,6 +330,7 @@
     margin-bottom: 10px;
   }
   .date-filter-group { display: flex; align-items: center; gap: 2px; }
+  .date-filter-group[hidden], .round-filter-group[hidden] { display: none !important; }
   .date-filter-input, .round-filter-select {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
@@ -1322,7 +1323,8 @@ function competitionIdsFor(filterValue) {
 // and "eng" are aggregates spanning many competitions with unrelated round
 // numbering, so round-based browsing doesn't apply to them.
 function isSingleCompetitionFilter(filterValue) {
-  return filterValue !== "all" && filterValue !== "eng";
+  const ids = competitionIdsFor(filterValue);
+  return Array.isArray(ids) && ids.length === 1;
 }
 
 function dateStrOf(dateValue) {
@@ -1391,8 +1393,14 @@ function updateSecondaryFilterVisibility(prefix) {
   const dateGroup = document.querySelector(`#${prefix}-date-filter`)?.closest(".date-filter-group");
   const roundGroup = document.querySelector(`#${prefix}-round-filter`)?.closest(".round-filter-group");
   const showRound = isSingleCompetitionFilter(state[`${prefix}Filter`]);
-  if (dateGroup) dateGroup.hidden = showRound;
-  if (roundGroup) roundGroup.hidden = !showRound;
+  if (dateGroup) {
+    dateGroup.hidden = showRound;
+    dateGroup.style.display = showRound ? "none" : "";
+  }
+  if (roundGroup) {
+    roundGroup.hidden = !showRound;
+    roundGroup.style.display = showRound ? "" : "none";
+  }
 }
 
 // (Re)builds the league filter chips for a Fixtures/Results panel from
