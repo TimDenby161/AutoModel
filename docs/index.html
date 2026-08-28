@@ -361,8 +361,8 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
-  #table-view-toggle, #matches-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
-  #table-view-toggle .filter-chip, #matches-view-toggle .filter-chip {
+  #table-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
+  #table-view-toggle .filter-chip {
     flex: 1; text-align: center; padding: 6px 10px; border-radius: 8px; font-size: 13px;
   }
 
@@ -388,16 +388,13 @@
     .date-filter-input, .round-filter-select { flex: 1; min-width: 0; }
     .round-nav-btn, .date-nav-btn { flex-shrink: 0; }
     #fixture-filters .filter-row,
-    #result-filters .filter-row,
     #table-filters .filter-row { gap: 5px; }
     #fixture-filters .filter-row:first-child,
-    #result-filters .filter-row:first-child,
     #table-filters .filter-row:first-child {
       flex-wrap: nowrap;
       gap: 3px;
     }
     #fixture-filters .filter-chip,
-    #result-filters .filter-chip,
     #table-filters .filter-chip {
       flex: 0 1 auto;
       min-width: 0;
@@ -406,16 +403,13 @@
       font-size: 11px;
     }
     #fixture-filters .filter-more,
-    #result-filters .filter-more,
     #table-filters .filter-more {
       width: 26px;
       min-width: 26px;
       padding-inline: 0;
     }
-    #fixture-filters .filter-label-full.has-short,
-    #result-filters .filter-label-full.has-short { display: none; }
-    #fixture-filters .filter-label-short,
-    #result-filters .filter-label-short { display: inline; }
+    #fixture-filters .filter-label-full.has-short { display: none; }
+    #fixture-filters .filter-label-short { display: inline; }
     #table-filters .filter-row:first-child { gap: 2px; }
     #table-filters .filter-chip {
       padding: 5px 4px;
@@ -679,54 +673,25 @@
 
 <main>
   <section class="panel" data-tab="fixtures" data-active="true">
-    <div class="filter-row" id="matches-view-toggle">
-      <button type="button" class="filter-chip" data-view="fixtures" aria-pressed="true">Fixtures</button>
-      <button type="button" class="filter-chip" data-view="results" aria-pressed="false">Results</button>
+    <div class="filters-wrap" id="fixture-filters">
+      <div class="filter-row"></div>
+      <div class="filter-row filter-row-more" hidden></div>
     </div>
-
-    <div id="fixtures-view">
-      <div class="filters-wrap" id="fixture-filters">
-        <div class="filter-row"></div>
-        <div class="filter-row filter-row-more" hidden></div>
+    <div class="secondary-filters">
+      <div class="date-filter-group">
+        <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
+        <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter matches by date">
+        <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
       </div>
-      <div class="secondary-filters">
-        <div class="date-filter-group">
-          <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
-          <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
-          <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
-        </div>
-        <div class="round-filter-group" hidden>
-          <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
-          <select id="fixture-round-filter" class="round-filter-select" disabled>
-            <option value="">Select a league for rounds</option>
-          </select>
-          <button type="button" class="round-nav-btn" id="fixture-round-next" aria-label="Next round" disabled>&#8250;</button>
-        </div>
+      <div class="round-filter-group" hidden>
+        <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
+        <select id="fixture-round-filter" class="round-filter-select" disabled>
+          <option value="">Select a league for rounds</option>
+        </select>
+        <button type="button" class="round-nav-btn" id="fixture-round-next" aria-label="Next round" disabled>&#8250;</button>
       </div>
-      <div id="fixtures-list" class="card-list"></div>
     </div>
-
-    <div id="results-view" hidden>
-      <div class="filters-wrap" id="result-filters">
-        <div class="filter-row"></div>
-        <div class="filter-row filter-row-more" hidden></div>
-      </div>
-      <div class="secondary-filters">
-        <div class="date-filter-group">
-          <button type="button" class="date-nav-btn" id="result-date-prev" aria-label="Previous day">&#8249;</button>
-          <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
-          <button type="button" class="date-nav-btn" id="result-date-next" aria-label="Next day">&#8250;</button>
-        </div>
-        <div class="round-filter-group" hidden>
-          <button type="button" class="round-nav-btn" id="result-round-prev" aria-label="Previous round" disabled>&#8249;</button>
-          <select id="result-round-filter" class="round-filter-select" disabled>
-            <option value="">Select a league for rounds</option>
-          </select>
-          <button type="button" class="round-nav-btn" id="result-round-next" aria-label="Next round" disabled>&#8250;</button>
-        </div>
-      </div>
-      <div id="results-list" class="card-list"></div>
-    </div>
+    <div id="fixtures-list" class="card-list"></div>
   </section>
 
   <section class="panel" data-tab="table">
@@ -895,12 +860,11 @@ const CONFIG = {
   // Client-side access gate for the private AI FPL tab. This prompts for a
   // passcode and skips the AIXI/API reads unless the browser is unlocked.
   aiFplAccessHash: "a64332fe1df1790cb79d428bf5b5767ddd589b1cca825cb1b9eb30f7e9aaee03",
-  resultsCount: 15,
 };
 // -------------------------------------------------------------------
 
-// Set once the first successful data load has applied Fixtures/Results'
-// default date/round view (today's fixtures, most recent day's results) -
+// Set once the first successful data load has applied Matches' default
+// date/round view (today, or the current round for a single competition) -
 // a manual Refresh afterward must not silently reset whatever filter/date/
 // round the user has since chosen.
 let initialDefaultsApplied = false;
@@ -919,19 +883,18 @@ const state = {
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
   currentGw: null,
-  fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current", matchesView: "fixtures",
-  // Competition names the user has collapsed in Fixtures/Results - persists
+  fixtureFilter: "all", tableFilter: "pl", tableView: "current",
+  // Competition names the user has collapsed on the Matches tab - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
   // just the DOM.
   collapsedFixtureGroups: new Set(),
-  collapsedResultGroups: new Set(),
   // Date filter: "" = unset, else a "YYYY-MM-DD" string straight from the
   // <input type="date">. Round filter: "" = "All rounds", else a Round
   // value as it appears on the Matches tab (e.g. "12", "1/8") - only
   // meaningful once a specific league is selected, since round numbers
   // aren't comparable across competitions.
-  fixtureDateFilter: "", resultDateFilter: "",
-  fixtureRoundFilter: "", resultRoundFilter: "",
+  fixtureDateFilter: "",
+  fixtureRoundFilter: "",
 };
 
 const AI_FPL_ACCESS_STORAGE_KEY = "matchlabAiFplAccess";
@@ -1499,17 +1462,6 @@ function matchProbsRowSnapshot(m) {
   );
 }
 
-// Always show the next N upcoming fixtures for whichever filter is active,
-// regardless of whether any of them are today - a thin match day (or one
-// with nothing at all, e.g. a season that hasn't started) shouldn't leave
-// the list looking empty when there's plenty more coming up.
-const FIXTURES_LOOKAHEAD_COUNT = 20;
-// Every fixture within this many days is always shown, even past the cap
-// above - otherwise a competition with few near-term matches (e.g. a
-// midweek cup tie) can get crowded off the list by busier leagues with more
-// fixtures on the same days.
-const FIXTURES_GUARANTEED_DAYS = 4;
-
 // <input type="date">'s value is "YYYY-MM-DD" - new Date(str) on that parses
 // as UTC midnight, which can land on the wrong local day in negative-UTC
 // timezones. Parse the components directly instead, so it lands on local
@@ -1566,53 +1518,41 @@ function todayDateStr() {
   return dateStrOf(new Date());
 }
 
-// Results' "All"/"English Teams" default: today if anything's finished
-// today, otherwise yesterday - deliberately not "most recent result day"
-// (which could be arbitrarily far back on a quiet day), so the default
-// view never shows stale results without the user asking for them.
-function defaultResultDateStr() {
-  const today = todayDateStr();
-  const hasToday = state.fixtures.some((m) =>
-    toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date && isSameLocalDay(m.Date, parseLocalDateInput(today))
-  );
-  if (hasToday) return today;
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  return dateStrOf(yesterday);
-}
-
-// The round of the soonest upcoming match (Fixtures) / most recent finished
-// match (Results) for a single competition - "next round"/"last round".
-function defaultRoundFor(prefix, filterValue) {
+// The "current" round for a single competition: the round containing the
+// soonest still-to-be-played match, so a round already under way (some
+// results in, some still to come) still lands there rather than jumping
+// ahead - falling back to the most recently finished round only once the
+// whole competition's visible fixture list is done.
+function defaultRoundFor(filterValue) {
   const ids = competitionIdsFor(filterValue);
   if (!ids) return "";
-  const isFixtures = prefix === "fixture";
   const relevant = state.fixtures.filter((m) =>
-    ids.includes(String(m.ID)) &&
-    toNum(m.Cancelled) === 0 &&
-    m.Date &&
-    (isFixtures ? toNum(m.Started) === 0 : toNum(m.Finished) === 1)
+    ids.includes(String(m.ID)) && toNum(m.Cancelled) === 0 && m.Date
   );
   if (!relevant.length) return "";
-  relevant.sort((a, b) =>
-    isFixtures ? new Date(a.Date) - new Date(b.Date) : new Date(b.Date) - new Date(a.Date)
-  );
-  return String(relevant[0].Round || "").trim();
+  const upcoming = relevant.filter((m) => toNum(m.Started) === 0);
+  if (upcoming.length) {
+    upcoming.sort((a, b) => new Date(a.Date) - new Date(b.Date));
+    return String(upcoming[0].Round || "").trim();
+  }
+  const finished = relevant
+    .filter((m) => toNum(m.Finished) === 1)
+    .sort((a, b) => new Date(b.Date) - new Date(a.Date));
+  return finished.length ? String(finished[0].Round || "").trim() : "";
 }
 
 // Sets the date/round filters to this filter's default view: "All"/
-// "English Teams" browse by date (today for Fixtures, today-or-yesterday
-// for Results); one specific competition browses by round instead (next
-// round for Fixtures, last round for Results).
+// "English Teams" browse by date (today), one specific competition browses
+// by round instead (see defaultRoundFor).
 function applyDefaultDateAndRound(prefix) {
   const filterValue = state[`${prefix}Filter`];
   const dateInput = document.getElementById(`${prefix}-date-filter`);
 
   if (isSingleCompetitionFilter(filterValue)) {
     state[`${prefix}DateFilter`] = "";
-    state[`${prefix}RoundFilter`] = defaultRoundFor(prefix, filterValue);
+    state[`${prefix}RoundFilter`] = defaultRoundFor(filterValue);
   } else {
-    state[`${prefix}DateFilter`] = prefix === "fixture" ? todayDateStr() : defaultResultDateStr();
+    state[`${prefix}DateFilter`] = todayDateStr();
     state[`${prefix}RoundFilter`] = "";
   }
   dateInput.value = state[`${prefix}DateFilter`];
@@ -1741,23 +1681,21 @@ function selectLeagueFilter(prefix, filterValue) {
   state[`${prefix}Filter`] = filterValue;
   applyDefaultDateAndRound(prefix);
   populateRoundFilter(prefix);
-  (prefix === "fixture" ? renderFixtures : renderResults)();
+  renderMatches();
 }
 
 // The sorted list of rounds actually present for the currently selected
 // competition - shared by populateRoundFilter (the <select>'s options) and
 // stepRound (the prev/next buttons), so both always agree on what "next"
 // means. Empty for "All"/"English Teams" - round numbers aren't comparable
-// across competitions.
+// across competitions. A round is available whenever it has any match at
+// all (finished or not), since selecting it shows both together.
 function getAvailableRounds(prefix) {
   const filterValue = state[`${prefix}Filter`];
   if (!isSingleCompetitionFilter(filterValue)) return [];
   const ids = competitionIdsFor(filterValue);
-  const isFixtures = prefix === "fixture";
   const relevant = state.fixtures.filter((m) =>
-    ids.includes(String(m.ID)) &&
-    toNum(m.Cancelled) === 0 &&
-    (isFixtures ? toNum(m.Started) === 0 : toNum(m.Finished) === 1)
+    ids.includes(String(m.ID)) && toNum(m.Cancelled) === 0 && m.Date
   );
   const rounds = [...new Set(relevant.map((m) => String(m.Round || "").trim()).filter(Boolean))];
   rounds.sort((a, b) => {
@@ -1824,7 +1762,7 @@ function stepRound(prefix, direction) {
   state[`${prefix}RoundFilter`] = rounds[idx];
   document.getElementById(`${prefix}-round-filter`).value = rounds[idx];
   updateRoundNavButtons(prefix);
-  (prefix === "fixture" ? renderFixtures : renderResults)();
+  renderMatches();
 }
 
 // Moves the date filter one day forward/back. Works regardless of which
@@ -1837,7 +1775,7 @@ function stepDate(prefix, direction) {
 
   state[`${prefix}DateFilter`] = newDateStr;
   document.getElementById(`${prefix}-date-filter`).value = newDateStr;
-  (prefix === "fixture" ? renderFixtures : renderResults)();
+  renderMatches();
 }
 
 // Curated priority order for how competition groups are stacked in the
@@ -1890,13 +1828,12 @@ function groupByCompetition(matches) {
   return sortedOrder.map((id) => groups[id]);
 }
 
-// Shared by renderFixtures/renderResults - wraps each competition's cards in
-// a collapsible group. collapsedSet is whichever of state.collapsedFixture/
-// ResultGroups applies, so a group's open/closed state survives re-renders.
-// The competition name is its own clickable target (data-jump-league) that
-// switches the filter to just that competition, defaulting to its next/last
-// round - separate from the caret/count, which just toggle the collapse
-// (see the click handlers on #fixtures-list/#results-list).
+// Wraps each competition's cards in a collapsible group. collapsedSet is
+// state.collapsedFixtureGroups, so a group's open/closed state survives
+// re-renders. The competition name is its own clickable target
+// (data-jump-league) that switches the filter to just that competition,
+// defaulting to its current round - separate from the caret/count, which
+// just toggle the collapse (see the click handler on #fixtures-list).
 function renderGroupedMatches(groups, collapsedSet, cardHtmlFn) {
   return groups.map((g) => {
     const collapsed = collapsedSet.has(g.id);
@@ -1927,50 +1864,16 @@ function toggleGroupCollapse(groupEl, collapsedSet) {
   if (caret) caret.innerHTML = !collapsed ? "&#9656;" : "&#9662;";
 }
 
-function renderFixtures() {
-  const container = document.getElementById("fixtures-list");
-  const today = new Date();
-  const leagueIds = competitionIdsFor(state.fixtureFilter);
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dateFilter = parseLocalDateInput(state.fixtureDateFilter);
-  const roundFilter = state.fixtureRoundFilter;
-  const allUpcoming = state.fixtures
-    .filter((m) => toNum(m.Started) === 0 && toNum(m.Cancelled) === 0 && m.Date)
-    .filter((m) => new Date(m.Date) >= todayStart)
-    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
-    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
-    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
-    .sort((a, b) => new Date(a.Date) - new Date(b.Date));
+function formatDateOnly(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
 
-  if (!allUpcoming.length) {
-    container.innerHTML = `<div class="empty-state">No fixtures found.</div>`;
-    return;
-  }
-
-  // A specific date or round is a deliberately narrow query - show
-  // everything that matches instead of capping/backfilling like the
-  // default rolling view does.
-  let upcoming;
-  let note = "";
-  if (dateFilter || roundFilter) {
-    upcoming = allUpcoming;
-  } else {
-    // Everything within the guaranteed window always makes the list; beyond
-    // that, backfill with the next-soonest fixtures up to the cap so a quiet
-    // stretch still shows plenty coming up.
-    const guaranteedThrough = new Date(todayStart);
-    guaranteedThrough.setDate(guaranteedThrough.getDate() + FIXTURES_GUARANTEED_DAYS);
-    const guaranteed = allUpcoming.filter((m) => new Date(m.Date) < guaranteedThrough);
-    const rest = allUpcoming.filter((m) => new Date(m.Date) >= guaranteedThrough);
-    upcoming = guaranteed.concat(rest).slice(0, Math.max(FIXTURES_LOOKAHEAD_COUNT, guaranteed.length));
-    const hasToday = upcoming.some((m) => isSameLocalDay(m.Date, today));
-    note = hasToday
-      ? ""
-      : `<div class="empty-state" style="padding:0 0 12px;">No fixtures today &mdash; showing upcoming fixtures.</div>`;
-  }
-
-  const groups = groupByCompetition(upcoming);
-  container.innerHTML = note + renderGroupedMatches(groups, state.collapsedFixtureGroups, (m) => `
+// A not-yet-finished match renders with the live projection, clickable team
+// names (opens the club fixtures modal) and a click-to-expand lineup panel.
+function fixtureCardHtml(m) {
+  return `
     <div class="match-card" data-home-id="${escapeHtml(m.ID_1)}" data-away-id="${escapeHtml(m.ID_2)}" data-home-name="${escapeHtml(m.Home)}" data-away-name="${escapeHtml(m.Away)}">
       <div class="match-comp">
         <span>${escapeHtml(formatKickoff(m.Date))}</span>
@@ -1989,7 +1892,82 @@ function renderFixtures() {
       ${matchProbsRow(m)}
       <div class="lineup-panel" hidden></div>
     </div>
-  `);
+  `;
+}
+
+// A finished match renders the final score (tinted by prediction accuracy)
+// and the frozen pre-kickoff snapshot instead - see finalScoreCenter/
+// matchProbsRowSnapshot for why the live figures aren't used here.
+function resultCardHtml(m) {
+  const tier = scoreAccuracyTier(m);
+  return `
+    <div class="match-card${tier ? ` ${tier.cls}` : ""}">
+      <div class="match-comp">
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+      </div>
+      <div class="match-teams">
+        <div class="match-team">
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.SnapHomeScr)}
+        </div>
+        ${finalScoreCenter(m)}
+        <div class="match-team away">
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.SnapAwayScr)}
+        </div>
+      </div>
+      ${matchProbsRowSnapshot(m)}
+    </div>
+  `;
+}
+
+// Fixtures and Results are one merged list - each match renders as a
+// fixture or result card purely based on its own Finished flag, so a single
+// day (or round) can show a finished result right next to an upcoming
+// fixture instead of needing two separate views.
+function matchCardHtml(m) {
+  return toNum(m.Finished) === 1 ? resultCardHtml(m) : fixtureCardHtml(m);
+}
+
+function renderMatches() {
+  const container = document.getElementById("fixtures-list");
+  const leagueIds = competitionIdsFor(state.fixtureFilter);
+  const dateFilter = parseLocalDateInput(state.fixtureDateFilter);
+  const roundFilter = state.fixtureRoundFilter;
+  const matching = state.fixtures
+    .filter((m) => toNum(m.Cancelled) === 0 && m.Date)
+    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
+    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
+    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
+    .sort((a, b) => new Date(a.Date) - new Date(b.Date));
+
+  let shown = matching;
+  let note = "";
+  if (!dateFilter && !roundFilter) {
+    // No specific date/round chosen (e.g. the date field was cleared) -
+    // Matches is a day-by-day view, so fall back to whichever single day
+    // has anything on it nearest to today, rather than an artificial
+    // rolling count.
+    const today = new Date();
+    const nearest = matching
+      .slice()
+      .sort((a, b) => Math.abs(new Date(a.Date) - today) - Math.abs(new Date(b.Date) - today))[0];
+    if (nearest) {
+      const nearestDay = new Date(nearest.Date);
+      shown = matching.filter((m) => isSameLocalDay(m.Date, nearestDay));
+      note = isSameLocalDay(nearest.Date, today)
+        ? ""
+        : `<div class="empty-state" style="padding:0 0 12px;">No matches today &mdash; showing ${escapeHtml(formatDateOnly(nearest.Date))}.</div>`;
+    }
+  }
+
+  if (!shown.length) {
+    container.innerHTML = `<div class="empty-state">No matches found.</div>`;
+    return;
+  }
+
+  const groups = groupByCompetition(shown);
+  container.innerHTML = note + renderGroupedMatches(groups, state.collapsedFixtureGroups, matchCardHtml);
 }
 
 function projScoreSub(raw) {
@@ -2110,52 +2088,6 @@ function finalScoreCenter(m) {
       ${awayWonPens ? pensTag : ""}
     </div>
   `;
-}
-
-function renderResults() {
-  const container = document.getElementById("results-list");
-  const leagueIds = competitionIdsFor(state.resultFilter);
-  const dateFilter = parseLocalDateInput(state.resultDateFilter);
-  const roundFilter = state.resultRoundFilter;
-  const matching = state.fixtures
-    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date)
-    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
-    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
-    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
-    .sort((a, b) => new Date(b.Date) - new Date(a.Date));
-
-  // A specific date or round is a deliberately narrow query - show
-  // everything that matches instead of capping to the default rolling count.
-  const recent = (dateFilter || roundFilter) ? matching : matching.slice(0, CONFIG.resultsCount);
-
-  if (!recent.length) {
-    container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
-    return;
-  }
-
-  const groups = groupByCompetition(recent);
-  container.innerHTML = renderGroupedMatches(groups, state.collapsedResultGroups, (m) => {
-    const tier = scoreAccuracyTier(m);
-    return `
-    <div class="match-card${tier ? ` ${tier.cls}` : ""}">
-      <div class="match-comp">
-        <span>${escapeHtml(formatKickoff(m.Date))}</span>
-      </div>
-      <div class="match-teams">
-        <div class="match-team">
-          ${escapeHtml(m.Home)}
-          ${clubScoreLabel(m.SnapHomeScr)}
-        </div>
-        ${finalScoreCenter(m)}
-        <div class="match-team away">
-          ${escapeHtml(m.Away)}
-          ${clubScoreLabel(m.SnapAwayScr)}
-        </div>
-      </div>
-      ${matchProbsRowSnapshot(m)}
-    </div>
-  `;
-  });
 }
 
 // Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
@@ -2811,7 +2743,6 @@ function showLoadErrorRow(tbody, colspan, label) {
 async function loadData() {
   if (!CONFIG.spreadsheetId || !CONFIG.sheetsApiKey) {
     showConfigWarning(document.getElementById("fixtures-list"));
-    showConfigWarning(document.getElementById("results-list"));
     document.getElementById("fpl-body").innerHTML = "";
     document.getElementById("table-body").innerHTML = "";
     setStatus("Not configured");
@@ -2826,21 +2757,16 @@ async function loadData() {
       .then((fixtures) => {
         state.fixtures = fixtures;
         renderLeagueFilterChips("fixture");
-        renderLeagueFilterChips("result");
         if (!initialDefaultsApplied) {
           initialDefaultsApplied = true;
           applyDefaultDateAndRound("fixture");
-          applyDefaultDateAndRound("result");
         }
         populateRoundFilter("fixture");
-        populateRoundFilter("result");
-        renderFixtures();
-        renderResults();
+        renderMatches();
       })
       .catch((err) => {
         console.error(err);
-        showLoadErrorCard(document.getElementById("fixtures-list"), "fixtures");
-        showLoadErrorCard(document.getElementById("results-list"), "results");
+        showLoadErrorCard(document.getElementById("fixtures-list"), "matches");
         throw err;
       }),
     fetchWithRetry(() => fetchSheetValues(CONFIG.fplTabName), "FPL")
@@ -2950,11 +2876,6 @@ document.getElementById("fixture-filters").addEventListener("click", (e) => {
   if (!btn) return;
   selectLeagueFilter("fixture", btn.dataset.filter);
 });
-document.getElementById("result-filters").addEventListener("click", (e) => {
-  const btn = e.target.closest(".filter-chip[data-filter]");
-  if (!btn) return;
-  selectLeagueFilter("result", btn.dataset.filter);
-});
 
 function wireDateRoundFilters(prefix, renderFn) {
   const dateInput = document.getElementById(`${prefix}-date-filter`);
@@ -2978,8 +2899,7 @@ function wireDateRoundFilters(prefix, renderFn) {
   roundPrev.addEventListener("click", () => stepRound(prefix, -1));
   roundNext.addEventListener("click", () => stepRound(prefix, 1));
 }
-wireDateRoundFilters("fixture", renderFixtures);
-wireDateRoundFilters("result", renderResults);
+wireDateRoundFilters("fixture", renderMatches);
 
 document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -2996,16 +2916,6 @@ document.querySelectorAll("#table-view-toggle .filter-chip[data-view]").forEach(
     btn.setAttribute("aria-pressed", "true");
     state.tableView = btn.dataset.view;
     renderTable();
-  });
-});
-
-document.querySelectorAll("#matches-view-toggle .filter-chip[data-view]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#matches-view-toggle .filter-chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", "false"));
-    btn.setAttribute("aria-pressed", "true");
-    state.matchesView = btn.dataset.view;
-    document.getElementById("fixtures-view").hidden = state.matchesView !== "fixtures";
-    document.getElementById("results-view").hidden = state.matchesView !== "results";
   });
 });
 
@@ -3105,17 +3015,6 @@ document.getElementById("fixtures-list").addEventListener("click", (e) => {
     card.dataset.homeName, card.dataset.awayName
   );
   panel.hidden = false;
-});
-
-document.getElementById("results-list").addEventListener("click", (e) => {
-  const jumpBtn = e.target.closest("[data-jump-league]");
-  if (jumpBtn) {
-    selectLeagueFilter("result", jumpBtn.dataset.jumpLeague);
-    return;
-  }
-  const header = e.target.closest(".comp-group-header");
-  if (!header) return;
-  toggleGroupCollapse(header.closest(".comp-group"), state.collapsedResultGroups);
 });
 
 // Both AI FPL actions run synchronously against a slow custom formula (the
