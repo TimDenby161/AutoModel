@@ -436,8 +436,13 @@
      "112-45"-style value with room to spare; Pl/GD/Pts are sized with room
      for a double-digit value. */
   .standings-table { table-layout: fixed; font-size: 11px; }
-  .standings-table th, .standings-table td { padding: 2px 3px; }
-  .standings-table.leaderboard th, .standings-table.leaderboard td { text-align: center; }
+  /* table.leaderboard th/td (above) sets padding:8px 6px at specificity
+     (0,1,2) - a plain ".standings-table th/td" override is only (0,1,1)
+     and loses to it, so every previous attempt to tighten row spacing here
+     silently did nothing. Compounding both classes (.standings-table
+     .leaderboard) matches its specificity via the class count instead,
+     so this actually wins. */
+  .standings-table.leaderboard th, .standings-table.leaderboard td { padding: 1px 3px; text-align: center; }
   .standings-table.leaderboard td.num, .standings-table.leaderboard th.num { text-align: center; }
   .standings-table.leaderboard th:nth-child(2), .standings-table.leaderboard td:nth-child(2) { text-align: left; }
   .standings-table th:first-child, .standings-table td:first-child { width: 20px; }
