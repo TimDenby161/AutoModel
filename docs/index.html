@@ -2338,10 +2338,10 @@ function openPlayerModal(r) {
   const statsHtml = `
     <div class="player-modal-stats">
       ${stat("Club", escapeHtml(r.club))}
-      ${stat("Position", escapeHtml(r.pos))}
       ${stat("xG", r.xg.toFixed(2))}
-      ${stat("Price", `&pound;${r.price.toFixed(1)}`)}
+      ${stat("Position", escapeHtml(r.pos))}
       ${stat("xA", r.xa.toFixed(2))}
+      ${stat("Price", `&pound;${r.price.toFixed(1)}`)}
       ${stat("Def", r.def === null ? "&ndash;" : r.def.toFixed(2))}
     </div>
   `;
