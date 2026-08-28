@@ -515,6 +515,8 @@
   .standings-table tbody tr.relegation-row:active { background: color-mix(in srgb, var(--status-critical) 30%, var(--surface-1)); }
   .standings-table tbody tr.qualification-row { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); }
   .standings-table tbody tr.qualification-row:active { background: color-mix(in srgb, var(--status-good) 30%, var(--surface-1)); }
+  .standings-table tbody tr.playoff-row { background: color-mix(in srgb, var(--status-warning) 18%, var(--surface-1)); }
+  .standings-table tbody tr.playoff-row:active { background: color-mix(in srgb, var(--status-warning) 32%, var(--surface-1)); }
 
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
@@ -1041,6 +1043,24 @@ const RELEGATION_ZONE_SIZE = {
 const QUALIFICATION_ZONE_SIZE = {
   pl: 4, champ: 2, l1: 2, l2: 3, nl: 1,
   bl: 4, ll: 4, seriea: 4, fr: 2, tur: 1, sau: 4, bra: 6,
+};
+
+// The N rows immediately below QUALIFICATION_ZONE_SIZE, for the yellow row
+// highlight - unlike the green/red zones, this one deliberately INCLUDES
+// uncertain positions (promotion play-offs, European qualifying-round-only
+// berths), since the ask was "any promotion play-off spot or qualification
+// for any other European comp". League One/Two/Championship/National
+// League: the promotion play-off places. Everywhere else: Europa League +
+// Conference League (or Brazil's Copa Sudamericana) - the exact EL/
+// Conference boundary shifts most seasons with domestic cup-final results
+// (a cup winner already inside the Champions League zone bumps everyone
+// below down a spot), so this is the researched total zone size rather
+// than a guaranteed per-position label. tur already accounts for both
+// qualifying-round berths (CL Q, EL Q, Conference Q). sau has no
+// researched second-tier (AFC Champions League Two) zone, so left at 0.
+const SECONDARY_ZONE_SIZE = {
+  pl: 2, champ: 4, l1: 4, l2: 4, nl: 6,
+  bl: 3, ll: 3, seriea: 3, fr: 4, tur: 3, bra: 6,
 };
 
 // Used only by Fixtures/Results (see buildCompetitionList/competitionIdsFor)
@@ -2358,11 +2378,14 @@ function renderTable() {
   }
   const relZoneSize = RELEGATION_ZONE_SIZE[state.tableFilter] || 0;
   const qualZoneSize = QUALIFICATION_ZONE_SIZE[state.tableFilter] || 0;
+  const secondaryZoneSize = SECONDARY_ZONE_SIZE[state.tableFilter] || 0;
   const fmt = (n) => String(Math.round(n));
   body.innerHTML = rows.map((r, i) => {
     const inRelZone = relZoneSize > 0 && i >= rows.length - relZoneSize;
-    const inQualZone = qualZoneSize > 0 && i < qualZoneSize;
-    const rowClass = inRelZone ? "relegation-row" : inQualZone ? "qualification-row" : "";
+    const inQualZone = !inRelZone && qualZoneSize > 0 && i < qualZoneSize;
+    const inSecondaryZone = !inRelZone && !inQualZone &&
+      secondaryZoneSize > 0 && i >= qualZoneSize && i < qualZoneSize + secondaryZoneSize;
+    const rowClass = inRelZone ? "relegation-row" : inQualZone ? "qualification-row" : inSecondaryZone ? "playoff-row" : "";
     return `
     <tr class="${rowClass}" data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
