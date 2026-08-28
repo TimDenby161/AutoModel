@@ -511,6 +511,8 @@
   .standings-table td:nth-child(2) { overflow-wrap: break-word; }
   .standings-table tbody tr { cursor: pointer; }
   .standings-table tbody tr:active { background: var(--chip-bg); }
+  .standings-table tbody tr.relegation-row { background: color-mix(in srgb, var(--status-critical) 16%, var(--surface-1)); }
+  .standings-table tbody tr.relegation-row:active { background: color-mix(in srgb, var(--status-critical) 30%, var(--surface-1)); }
 
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
@@ -999,6 +1001,22 @@ const LEAGUE_FILTERS = {
   ecl: ["10216"],
   caf: ["526"],
   eng: ["47", "48", "108", "109", "117", "8944", "132", "133", "142", "247"],
+};
+
+// Bottom-N automatic-relegation zone size per league, for the red row
+// highlight in renderTable - this genuinely varies league to league, not
+// always the "standard" 3: League One relegates 4, League Two only 2,
+// National League 4 (3 to Nat'l League South, 1 to North). Süper Lig was
+// cut to 18 teams for 2025-26, dropping its zone from 4 to 3 going
+// forward. Bundesliga and Ligue 1 each also have a 16th-place relegation
+// play-off berth above their bottom-2 automatic zone - that spot isn't a
+// certain relegation, so it's deliberately left out of the red count here.
+// Not defined for aggregate views (all/eng) or continental cups (ucl/el/
+// ecl/caf), where table position doesn't correspond to one division's
+// relegation zone.
+const RELEGATION_ZONE_SIZE = {
+  pl: 3, champ: 3, l1: 4, l2: 2, nl: 4,
+  bl: 2, ll: 3, seriea: 3, fr: 2, tur: 3, sau: 3, bra: 4,
 };
 
 // Used only by Fixtures/Results (see buildCompetitionList/competitionIdsFor)
@@ -2314,9 +2332,12 @@ function renderTable() {
     body.innerHTML = `<tr><td colspan="7"><div class="empty-state">No clubs found.</div></td></tr>`;
     return;
   }
+  const relZoneSize = RELEGATION_ZONE_SIZE[state.tableFilter] || 0;
   const fmt = (n) => String(Math.round(n));
-  body.innerHTML = rows.map((r, i) => `
-    <tr data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
+  body.innerHTML = rows.map((r, i) => {
+    const inRelZone = relZoneSize > 0 && i >= rows.length - relZoneSize;
+    return `
+    <tr class="${inRelZone ? "relegation-row" : ""}" data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
       <td>${escapeHtml(tableDisplayName(r.name))}</td>
       <td class="num">${fmt(r.stats.pl)}</td>
@@ -2325,7 +2346,8 @@ function renderTable() {
       <td class="num">${fmt(r.stats.gd)}</td>
       <td class="num">${fmt(r.stats.pts)}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 }
 
 // A club's next N upcoming fixtures across every competition it's in (not
