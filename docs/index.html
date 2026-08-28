@@ -513,6 +513,8 @@
   .standings-table tbody tr:active { background: var(--chip-bg); }
   .standings-table tbody tr.relegation-row { background: color-mix(in srgb, var(--status-critical) 16%, var(--surface-1)); }
   .standings-table tbody tr.relegation-row:active { background: color-mix(in srgb, var(--status-critical) 30%, var(--surface-1)); }
+  .standings-table tbody tr.relegation-playoff-row { background: color-mix(in srgb, var(--mins-orange) 20%, var(--surface-1)); }
+  .standings-table tbody tr.relegation-playoff-row:active { background: color-mix(in srgb, var(--mins-orange) 34%, var(--surface-1)); }
   .standings-table tbody tr.qualification-row { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); }
   .standings-table tbody tr.qualification-row:active { background: color-mix(in srgb, var(--status-good) 30%, var(--surface-1)); }
   .standings-table tbody tr.playoff-row { background: color-mix(in srgb, var(--status-warning) 18%, var(--surface-1)); }
@@ -1039,28 +1041,44 @@ const RELEGATION_ZONE_SIZE = {
 // route in, not a certain spot. sau/bra: Saudi Pro League's AFC Champions
 // League Elite and Brazil's Copa Libertadores access both mix in cup
 // results alongside table position, so these two are the least certain
-// entries here - flagged as such, correct if wrong.
+// entries here - flagged as such, correct if wrong. sau: AFC Champions
+// League Elite's 3 league-stage berths go to the top 3 by position
+// (champion/runner-up/3rd), ignoring the King's Cup winner overlap noted
+// in SECONDARY_ZONE_SIZE below.
 const QUALIFICATION_ZONE_SIZE = {
   pl: 4, champ: 2, l1: 2, l2: 3, nl: 1,
-  bl: 4, ll: 4, seriea: 4, fr: 2, tur: 1, sau: 4, bra: 6,
+  bl: 4, ll: 4, seriea: 4, fr: 2, tur: 1, sau: 3, bra: 6,
 };
 
 // The N rows immediately below QUALIFICATION_ZONE_SIZE, for the yellow row
 // highlight - unlike the green/red zones, this one deliberately INCLUDES
 // uncertain positions (promotion play-offs, European qualifying-round-only
 // berths), since the ask was "any promotion play-off spot or qualification
-// for any other European comp". League One/Two/Championship/National
-// League: the promotion play-off places. Everywhere else: Europa League +
+// for any other European comp". League One/Two/National League: the
+// promotion play-off places. Championship expanded its play-offs from 4 to
+// 6 teams (3rd-8th) starting 2026/27. Everywhere else: Europa League +
 // Conference League (or Brazil's Copa Sudamericana) - the exact EL/
 // Conference boundary shifts most seasons with domestic cup-final results
 // (a cup winner already inside the Champions League zone bumps everyone
 // below down a spot), so this is the researched total zone size rather
 // than a guaranteed per-position label. tur already accounts for both
-// qualifying-round berths (CL Q, EL Q, Conference Q). sau has no
-// researched second-tier (AFC Champions League Two) zone, so left at 0.
+// qualifying-round berths (CL Q, EL Q, Conference Q). sau: AFC Champions
+// League Two's berth is 4th place by default - if the King's Cup winner is
+// already inside the top 3, they'd take it instead, but that's a cup
+// result this table can't see.
 const SECONDARY_ZONE_SIZE = {
-  pl: 2, champ: 4, l1: 4, l2: 4, nl: 6,
-  bl: 3, ll: 3, seriea: 3, fr: 4, tur: 3, bra: 6,
+  pl: 2, champ: 6, l1: 4, l2: 4, nl: 6,
+  bl: 3, ll: 3, seriea: 3, fr: 4, tur: 3, sau: 1, bra: 6,
+};
+
+// The N rows directly above RELEGATION_ZONE_SIZE's automatic zone, for the
+// orange relegation play-off highlight - a team here isn't safe, but isn't
+// certainly down either. Only Bundesliga (16th plays 2. Bundesliga's 3rd
+// place) and Ligue 1 (16th plays Ligue 2's 3rd place) are confirmed to
+// have this; every other league here relegates straight off the bottom of
+// the table with no play-off step.
+const RELEGATION_PLAYOFF_ZONE_SIZE = {
+  bl: 1, fr: 1,
 };
 
 // Used only by Fixtures/Results (see buildCompetitionList/competitionIdsFor)
@@ -2377,15 +2395,21 @@ function renderTable() {
     return;
   }
   const relZoneSize = RELEGATION_ZONE_SIZE[state.tableFilter] || 0;
+  const relPlayoffZoneSize = RELEGATION_PLAYOFF_ZONE_SIZE[state.tableFilter] || 0;
   const qualZoneSize = QUALIFICATION_ZONE_SIZE[state.tableFilter] || 0;
   const secondaryZoneSize = SECONDARY_ZONE_SIZE[state.tableFilter] || 0;
   const fmt = (n) => String(Math.round(n));
   body.innerHTML = rows.map((r, i) => {
     const inRelZone = relZoneSize > 0 && i >= rows.length - relZoneSize;
-    const inQualZone = !inRelZone && qualZoneSize > 0 && i < qualZoneSize;
-    const inSecondaryZone = !inRelZone && !inQualZone &&
+    const inRelPlayoffZone = !inRelZone && relPlayoffZoneSize > 0 &&
+      i >= rows.length - relZoneSize - relPlayoffZoneSize && i < rows.length - relZoneSize;
+    const inQualZone = !inRelZone && !inRelPlayoffZone && qualZoneSize > 0 && i < qualZoneSize;
+    const inSecondaryZone = !inRelZone && !inRelPlayoffZone && !inQualZone &&
       secondaryZoneSize > 0 && i >= qualZoneSize && i < qualZoneSize + secondaryZoneSize;
-    const rowClass = inRelZone ? "relegation-row" : inQualZone ? "qualification-row" : inSecondaryZone ? "playoff-row" : "";
+    const rowClass = inRelZone ? "relegation-row"
+      : inRelPlayoffZone ? "relegation-playoff-row"
+      : inQualZone ? "qualification-row"
+      : inSecondaryZone ? "playoff-row" : "";
     return `
     <tr class="${rowClass}" data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
