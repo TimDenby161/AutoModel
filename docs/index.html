@@ -568,7 +568,7 @@
   th.sortable { cursor: pointer; }
   th.sortable.active { color: var(--series-blue); }
 
-  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 8px; }
   .action-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-primary); border-radius: 8px; padding: 8px 12px;
@@ -578,6 +578,9 @@
   .action-btn:disabled { opacity: 0.5; }
   #ai-squad-section { margin-bottom: 16px; }
   .ai-fpl-status { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; min-height: 16px; }
+  /* No status text right now (the common case) - collapse the space
+     entirely instead of leaving an empty reserved gap above the cards. */
+  .ai-fpl-status:empty { display: none; }
   .ai-gw-card {
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px;
