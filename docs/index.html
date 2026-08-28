@@ -2547,6 +2547,9 @@ function renderSquadPitch(squad, benchedNames) {
 }
 
 function renderAiTransferRow(m) {
+  // A free transfer is the normal case and needs no callout - only worth
+  // flagging when it costs points (a hit, e.g. "Hit (-4)").
+  const isFree = m.type.trim().toLowerCase() === "free transfer";
   return `
     <div class="ai-transfer-row">
       <span class="ai-transfer-gw">GW${m.gw}</span>
@@ -2554,7 +2557,7 @@ function renderAiTransferRow(m) {
         <div class="ai-transfer-out">OUT &nbsp;${escapeHtml(m.sell)}</div>
         <div class="ai-transfer-in">IN &nbsp;&nbsp;${escapeHtml(m.buy)}</div>
       </div>
-      <span class="ai-transfer-type">${escapeHtml(m.type)}</span>
+      ${isFree ? "" : `<span class="ai-transfer-type">${escapeHtml(m.type)}</span>`}
     </div>
   `;
 }
