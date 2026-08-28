@@ -820,11 +820,11 @@
     </div>
     <div class="ai-fpl-actions">
       <button type="button" id="ai-plan-wc-btn" class="action-btn">Plan Wildcard</button>
-      <button type="button" id="ai-confirm-wc-btn" class="action-btn">Confirm Wildcard</button>
+      <button type="button" id="ai-confirm-wc-btn" class="action-btn" style="display:none">Confirm Wildcard</button>
     </div>
     <div class="ai-fpl-actions">
       <button type="button" id="ai-plan-fh-btn" class="action-btn">Plan Free Hit</button>
-      <button type="button" id="ai-confirm-fh-btn" class="action-btn">Confirm Free Hit</button>
+      <button type="button" id="ai-confirm-fh-btn" class="action-btn" style="display:none">Confirm Free Hit</button>
     </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
 
@@ -2722,6 +2722,12 @@ function renderAiFpl() {
       ${plan.bench.length ? `<div class="ai-gw-section-label">Bench</div>${plan.bench.map(renderAiPlayerRow).join("")}` : ""}
     </div>
   `).join("");
+
+  // Confirm Wildcard/Confirm Free Hit only make sense once PLAN_WILDCARD/
+  // PLAN_FREE_HIT has actually written a draft to confirm - otherwise
+  // there's nothing on AIXI for them to read back.
+  document.getElementById("ai-confirm-wc-btn").style.display = state.aiFplWildcardPlan ? "" : "none";
+  document.getElementById("ai-confirm-fh-btn").style.display = state.aiFplFreeHitPlan ? "" : "none";
 
   const container = document.getElementById("ai-fpl-list");
   if (!blocks.length) {
