@@ -819,11 +819,11 @@
       <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
     </div>
     <div class="ai-fpl-actions">
-      <button type="button" id="ai-plan-wc-btn" class="action-btn">Plan Wildcard</button>
+      <button type="button" id="ai-plan-wc-btn" class="action-btn" style="display:none">Plan Wildcard</button>
       <button type="button" id="ai-confirm-wc-btn" class="action-btn" style="display:none">Confirm Wildcard</button>
     </div>
     <div class="ai-fpl-actions">
-      <button type="button" id="ai-plan-fh-btn" class="action-btn">Plan Free Hit</button>
+      <button type="button" id="ai-plan-fh-btn" class="action-btn" style="display:none">Plan Free Hit</button>
       <button type="button" id="ai-confirm-fh-btn" class="action-btn" style="display:none">Confirm Free Hit</button>
     </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
@@ -2677,6 +2677,16 @@ function renderAiFpl() {
   const chipRangeLabel = Number.isFinite(state.currentGw) && chipLastGw
     ? `GW${state.currentGw}&ndash;GW${chipLastGw}`
     : "";
+
+  // Plan Wildcard/Plan Free Hit only show up when the Chip Plan actually
+  // recommends playing that chip THIS gameweek - e.g. if Free Hit's Best
+  // GW is a future week, not state.currentGw, there's nothing to draft yet.
+  const wildcardRec = chipPlan.chips.find((c) => c.name === "Wildcard");
+  const freeHitRec = chipPlan.chips.find((c) => c.name === "Free Hit");
+  const showPlanWildcard = !!wildcardRec && wildcardRec.verdict === "PLAY" && Number(wildcardRec.bestGw) === state.currentGw;
+  const showPlanFreeHit = !!freeHitRec && freeHitRec.verdict === "PLAY" && Number(freeHitRec.bestGw) === state.currentGw;
+  document.getElementById("ai-plan-wc-btn").style.display = showPlanWildcard ? "" : "none";
+  document.getElementById("ai-plan-fh-btn").style.display = showPlanFreeHit ? "" : "none";
 
   document.getElementById("ai-chip-plan").innerHTML = `
     <div class="ai-chip-card">
