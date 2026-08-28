@@ -545,7 +545,7 @@
   .fpl-table-compact th:first-child, .fpl-table-compact td:first-child {
     width: auto; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .fpl-table-compact th:nth-child(2), .fpl-table-compact td:nth-child(2) { width: 26px; }
+  .fpl-table-compact th:nth-child(2), .fpl-table-compact td:nth-child(2) { width: 54px; }
   .fpl-table-compact th:nth-child(n+3), .fpl-table-compact td:nth-child(n+3) { width: 44px; }
   .fpl-table-compact tbody tr { cursor: pointer; }
   .fpl-table-compact tbody tr:active { background: var(--chip-bg); }
@@ -767,12 +767,10 @@
         <thead>
           <tr>
             <th>Player</th>
-            <th class="num">Pos</th>
-            <th class="num sortable" data-key="price">Price</th>
-            <th class="num sortable" data-key="xpts">xPts</th>
-            <th class="num sortable" data-key="gw2">2GW</th>
+            <th class="num sortable" data-key="price">Pos</th>
+            <th class="num sortable" data-key="xpts">1GW</th>
             <th class="num sortable" data-key="gw5">5GW</th>
-            <th class="num sortable" data-key="gw6">6GW</th>
+            <th class="num sortable" data-key="gw10">10GW</th>
           </tr>
         </thead>
         <tbody id="fpl-body"></tbody>
@@ -2043,9 +2041,8 @@ function fplRow(p) {
     price: toNum(p.Price),
     mins: toNum(p.ExpMins),
     xpts: toNum(p.xptsNext),
-    gw2: toNum(p["2GW"]),
     gw5: toNum(p["5GW"]),
-    gw6: toNum(p["6GW"]),
+    gw10: toNum(p["10GW"]),
     xg: toNum(p.xG),
     xa: toNum(p.xA),
     def: defStat,
@@ -2087,18 +2084,16 @@ function renderFpl() {
   fplLastRows = rows;
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7"><div class="empty-state">No matching players.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">No matching players.</div></td></tr>`;
     return;
   }
   body.innerHTML = rows.map((r, i) => `
     <tr data-fpl-idx="${i}">
       <td class="player-name">${escapeHtml(r.name)}</td>
-      <td class="num">${escapeHtml(r.pos)}</td>
-      <td class="num">${r.price.toFixed(1)}</td>
+      <td class="num">${escapeHtml(r.pos)}-${r.price.toFixed(1)}</td>
       <td class="num">${r.xpts.toFixed(2)}</td>
-      <td class="num">${r.gw2.toFixed(2)}</td>
       <td class="num">${r.gw5.toFixed(2)}</td>
-      <td class="num">${r.gw6.toFixed(2)}</td>
+      <td class="num">${r.gw10.toFixed(2)}</td>
     </tr>
   `).join("");
 }
