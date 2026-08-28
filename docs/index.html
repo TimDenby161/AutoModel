@@ -430,21 +430,22 @@
     text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
   }
   table.leaderboard tbody tr:active { background: var(--chip-bg); }
-  /* All 9 columns fit a phone-width screen without scrolling - narrow
-     numeric columns, Club takes whatever width is left over. GF/GA are
-     merged into one "+/-" column (see renderTable) to free up room and
-     cut down on how squashed everything else gets. */
+  /* All 9 columns fit a phone-width screen without scrolling - Club takes
+     whatever width is left over after the numeric columns. Pl/W/D/L/GD/Pts
+     are sized with room to spare for a double-digit value, and +/- (the
+     merged GF-GA column - see renderTable) is wide enough for up to 6
+     characters (e.g. "112-45"). */
   .standings-table { table-layout: fixed; font-size: 11px; }
   .standings-table th, .standings-table td { padding: 2px 3px; }
-  .standings-table th:first-child, .standings-table td:first-child { width: 18px; padding-left: 0; }
+  .standings-table th:first-child, .standings-table td:first-child { width: 20px; padding-left: 0; }
   .standings-table th:nth-child(3), .standings-table td:nth-child(3),
   .standings-table th:nth-child(4), .standings-table td:nth-child(4),
   .standings-table th:nth-child(5), .standings-table td:nth-child(5),
-  .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 18px; }
-  .standings-table th:nth-child(7), .standings-table td:nth-child(7) { width: 48px; }
-  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 26px; }
+  .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 26px; }
+  .standings-table th:nth-child(7), .standings-table td:nth-child(7) { width: 56px; }
+  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 30px; }
   .standings-table th:last-child, .standings-table td:last-child {
-    width: 28px; font-weight: 700; padding-right: 0;
+    width: 32px; font-weight: 700; padding-right: 0;
   }
   .standings-table td:nth-child(2) { overflow-wrap: break-word; }
   .standings-table tbody tr { cursor: pointer; }
