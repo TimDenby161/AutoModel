@@ -206,6 +206,12 @@
     font-weight: 600; font-size: 11px; color: var(--text-muted);
     flex-shrink: 0; width: 40px; text-align: right;
   }
+  .pitch-player-badge {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    padding: 1px 4px; border-radius: 4px; vertical-align: middle;
+  }
+  .pitch-player-badge-c { background: var(--status-warning); color: #1a1200; }
+  .pitch-player-badge-vc { background: var(--border); color: var(--text-secondary); }
   .match-comp {
     font-size: 11px; color: var(--text-muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.02em;
@@ -2417,11 +2423,14 @@ function renderAiPlayerRow(p) {
 // way.
 const SQUAD_PITCH_ORDER = ["GK", "DEF", "MID", "FWD"];
 
-function renderSquadPitchPlayer(p, isBenched) {
+function renderSquadPitchPlayer(p, isBenched, badge) {
+  const badgeHtml = badge
+    ? ` <span class="pitch-player-badge pitch-player-badge-${badge.toLowerCase()}">${badge}</span>`
+    : "";
   return `
     <div class="pitch-player ${isBenched ? "mins-red" : minsColorClass(p.mins)}">
       <span class="pitch-player-pos">${escapeHtml(p.pos)}</span>
-      <span class="pitch-player-name">${escapeHtml(p.player)}</span>
+      <span class="pitch-player-name">${escapeHtml(p.player)}${badgeHtml}</span>
       <span class="pitch-player-price">&pound;${p.price.toFixed(1)}</span>
       <span class="pitch-player-xpts">${p.xpts.toFixed(1)}pts</span>
     </div>
@@ -2461,13 +2470,26 @@ function computeCurrentGwBench(squad) {
   return new Set(benched.map((p) => p.player));
 }
 
+// Captain/vice-captain: the two highest current-GW xPts among the starting
+// XI (not the whole squad - benched players can't be captained), same
+// convention the AI's own multi-week plans don't otherwise surface for the
+// current gameweek since (see computeCurrentGwBench) it isn't planned there.
+function computeCaptaincy(squad, benchedNames) {
+  const starters = squad.filter((p) => !benchedNames.has(p.player)).sort((a, b) => b.xpts - a.xpts);
+  return { captain: starters[0]?.player || null, vice: starters[1]?.player || null };
+}
+
 function renderSquadPitch(squad) {
   if (!squad.length) return `<div class="empty-state">No current squad data yet.</div>`;
   const benchedNames = computeCurrentGwBench(squad);
+  const { captain, vice } = computeCaptaincy(squad, benchedNames);
   const body = SQUAD_PITCH_ORDER.map((pos) => {
     const players = squad.filter((p) => p.pos === pos);
     if (!players.length) return "";
-    return `<div class="pitch-group">${players.map((p) => renderSquadPitchPlayer(p, benchedNames.has(p.player))).join("")}</div>`;
+    return `<div class="pitch-group">${players.map((p) => {
+      const badge = p.player === captain ? "C" : p.player === vice ? "VC" : "";
+      return renderSquadPitchPlayer(p, benchedNames.has(p.player), badge);
+    }).join("")}</div>`;
   }).join("");
   return `<div class="lineup-pitch squad-pitch">${body}</div>`;
 }
