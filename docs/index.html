@@ -430,26 +430,22 @@
     text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
   }
   table.leaderboard tbody tr:active { background: var(--chip-bg); }
-  /* All 9 columns fit a phone-width screen without scrolling - Club takes
-     whatever width is left over after the numeric columns. Pl/W/D/L/GD/Pts
-     are sized with room to spare for a double-digit value, and +/- (the
-     merged GF-GA column - see renderTable) is wide enough for up to 6
-     characters (e.g. "112-45"). */
+  /* All 7 columns fit a phone-width screen without scrolling - Club takes
+     whatever width is left over after the numeric columns. W-D-L and +/-
+     (see renderTable) are merged columns sized for a full "15-11-12"/
+     "112-45"-style value with room to spare; Pl/GD/Pts are sized with room
+     for a double-digit value. */
   .standings-table { table-layout: fixed; font-size: 11px; }
   .standings-table th, .standings-table td { padding: 2px 3px; }
-  .standings-table th:first-child, .standings-table td:first-child { width: 20px; padding-left: 0; }
+  .standings-table.leaderboard th, .standings-table.leaderboard td { text-align: center; }
+  .standings-table.leaderboard td.num, .standings-table.leaderboard th.num { text-align: center; }
+  .standings-table th:first-child, .standings-table td:first-child { width: 20px; }
   .standings-table th:nth-child(3), .standings-table td:nth-child(3) { width: 26px; }
-  /* W/D/L pulled visually closer together (tighter gutter between them)
-     while keeping each cell wide enough for a double-digit value. */
-  .standings-table th:nth-child(4), .standings-table td:nth-child(4),
-  .standings-table th:nth-child(5), .standings-table td:nth-child(5),
-  .standings-table th:nth-child(6), .standings-table td:nth-child(6) {
-    width: 22px; padding-left: 1px; padding-right: 1px;
-  }
-  .standings-table th:nth-child(7), .standings-table td:nth-child(7) { width: 56px; }
-  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 30px; }
+  .standings-table th:nth-child(4), .standings-table td:nth-child(4) { width: 64px; }
+  .standings-table th:nth-child(5), .standings-table td:nth-child(5) { width: 56px; }
+  .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 30px; }
   .standings-table th:last-child, .standings-table td:last-child {
-    width: 32px; font-weight: 700; padding-right: 0;
+    width: 32px; font-weight: 700;
   }
   .standings-table td:nth-child(2) { overflow-wrap: break-word; }
   .standings-table tbody tr { cursor: pointer; }
@@ -681,9 +677,7 @@
             <th>#</th>
             <th>Club</th>
             <th class="num">Pl</th>
-            <th class="num">W</th>
-            <th class="num">D</th>
-            <th class="num">L</th>
+            <th class="num">W-D-L</th>
             <th class="num">+/-</th>
             <th class="num">GD</th>
             <th class="num">Pts</th>
@@ -2150,7 +2144,7 @@ function renderTable() {
   );
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="9"><div class="empty-state">No clubs found.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state">No clubs found.</div></td></tr>`;
     return;
   }
   const fmt = (n) => String(Math.round(n));
@@ -2159,9 +2153,7 @@ function renderTable() {
       <td>${i + 1}</td>
       <td>${escapeHtml(tableDisplayName(r.name))}</td>
       <td class="num">${fmt(r.stats.pl)}</td>
-      <td class="num">${fmt(r.stats.w)}</td>
-      <td class="num">${fmt(r.stats.d)}</td>
-      <td class="num">${fmt(r.stats.l)}</td>
+      <td class="num">${fmt(r.stats.w)}-${fmt(r.stats.d)}-${fmt(r.stats.l)}</td>
       <td class="num">${fmt(r.stats.gf)}-${fmt(r.stats.ga)}</td>
       <td class="num">${fmt(r.stats.gd)}</td>
       <td class="num">${fmt(r.stats.pts)}</td>
@@ -2394,7 +2386,7 @@ async function loadData() {
       })
       .catch((err) => {
         console.error(err);
-        showLoadErrorRow(document.getElementById("table-body"), 9, "the table");
+        showLoadErrorRow(document.getElementById("table-body"), 7, "the table");
         throw err;
       }),
     // No dedicated tab/error UI for this one - it only powers the
