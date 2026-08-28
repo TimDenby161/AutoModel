@@ -2,10 +2,12 @@ name: Sync AutoModel Data
 
 on:
   schedule:
-    # 03:00 UTC nightly. GitHub cron doesn't shift for daylight saving, so
-    # this is 3am GMT / 4am BST - adjust the minute/hour below if you want
-    # a different local time.
-    - cron: "0 3 * * *"
+    # ~03:00 UTC nightly (3am GMT / 4am BST - GitHub cron doesn't shift for
+    # daylight saving). Deliberately not on the hour: GitHub's scheduler
+    # gets congested at round times like 03:00 shared by huge numbers of
+    # repos, and can silently drop a run rather than delay it - happened on
+    # the night of 2026-08-27/28. Offsetting the minute reduces that risk.
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       sync_players:
