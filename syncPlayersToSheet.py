@@ -1475,7 +1475,16 @@ def sync_matches(
         cached_all=cached_all,
     )
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_date = datetime.now(timezone.utc).date()
+    today = today_date.isoformat()
+    # Matches within this many days are re-fetched even though they haven't
+    # kicked off yet, to catch things a stored row can't self-correct from
+    # otherwise: a rescheduled date/time, or a cup tie recorded as
+    # "Wimbledon/Fulham" before the replay that should now read "Fulham".
+    # Anything further out than this stays skipped, same as before, so the
+    # bulk of the far-future fixture list isn't re-queried every run.
+    NEAR_TERM_REFRESH_DAYS = 7
+    near_term_horizon = (today_date + timedelta(days=NEAR_TERM_REFRESH_DAYS)).isoformat()
 
     updates: list[tuple[int, list[Any]]] = []
     appended_rows: list[list[Any]] = []
@@ -1488,14 +1497,16 @@ def sync_matches(
         row = [row_dict.get(header, "") for header in gmatch.HEADERS]
         if match_id in existing_by_id:
             # An existing row is only worth rewriting if it's not finished
-            # yet AND its date has already passed - i.e. it's actually due
-            # for a status/result update. A future fixture that's already
-            # round-filled has nothing left to change until its date
-            # arrives, and a finished match never changes again.
+            # yet AND (its date has already passed, so it's actually due for
+            # a status/result update, OR it kicks off soon enough that its
+            # own details could still change - see NEAR_TERM_REFRESH_DAYS
+            # above). A finished match never changes again, and a fixture
+            # both far out and already round-filled has nothing left to
+            # change until one of those becomes true.
             existing_row = cached_all.get(match_id, {})
             already_finished = str(existing_row.get("Finished", "")) == "1"
             match_date = str(existing_row.get("Match UTC", ""))[:10]
-            not_due_yet = bool(match_date) and match_date > today
+            not_due_yet = bool(match_date) and match_date > near_term_horizon
             if already_finished or not_due_yet:
                 skipped_not_due += 1
                 continue
