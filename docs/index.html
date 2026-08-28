@@ -818,6 +818,14 @@
       <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
       <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
     </div>
+    <div class="ai-fpl-actions">
+      <button type="button" id="ai-plan-wc-btn" class="action-btn">Plan Wildcard</button>
+      <button type="button" id="ai-confirm-wc-btn" class="action-btn">Confirm Wildcard</button>
+    </div>
+    <div class="ai-fpl-actions">
+      <button type="button" id="ai-plan-fh-btn" class="action-btn">Plan Free Hit</button>
+      <button type="button" id="ai-confirm-fh-btn" class="action-btn">Confirm Free Hit</button>
+    </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
 
     <div class="ai-top-row">
@@ -826,6 +834,8 @@
     </div>
 
     <div id="ai-squad-section"></div>
+
+    <div id="ai-plan-section" class="card-list"></div>
 
     <div id="ai-fpl-list" class="card-list"></div>
   </section>
@@ -898,6 +908,7 @@ let aiFplAccessUnlocked = false;
 const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
   aiFplChipPlan: { title: "", chips: [] }, aiFplSquad: [],
+  aiFplWildcardPlan: null, aiFplFreeHitPlan: null,
   fplSortKey: "xpts", fplSortDir: -1,
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
@@ -1226,6 +1237,50 @@ function parseAiFplBlocks(rows) {
 
   blocks.forEach((b) => b.bench.sort((a, c) => a.order - c.order));
   return blocks;
+}
+
+// Reads one of the Wildcard/Free Hit draft blocks (written by PLAN_WILDCARD/
+// PLAN_FREE_HIT to fixed rows just after the GW XI blocks) - same row shape
+// as a GW XI block, just matched by a fixed title prefix instead of the
+// "GW\d+ XI" pattern parseAiFplBlocks uses, so a still-open draft never
+// gets swept up as if it were a real planned gameweek. Once actually
+// confirmed, CONFIRM_FREE_HIT rewrites row 26 as "GW2 XI (Free Hit) - ..."
+// which *does* match parseAiFplBlocks - no dashboard change needed for
+// that path, this parser is only for the not-yet-confirmed draft.
+function parseAiFplPlanBlock(rows, titlePrefix) {
+  const startIdx = rows.findIndex((row) => (row[0] || "").trim().toUpperCase().startsWith(titlePrefix.toUpperCase()));
+  if (startIdx < 0) return null;
+
+  const label = (rows[startIdx][0] || "").trim();
+  const formationMatch = label.match(/\d+-\d+(?:-\d+)*/);
+  const xptsMatch = label.match(/([\d.]+)\s*xPts/i);
+  const block = {
+    label,
+    formation: formationMatch ? formationMatch[0] : "",
+    totalXpts: xptsMatch ? toNum(xptsMatch[1]) : 0,
+    xi: [],
+    bench: [],
+  };
+
+  for (let i = startIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const first = (row[0] || "").trim();
+    if (first === "Role") continue; // this block's own header row
+    const [role, pos, player, club, price, xpts, order] = row;
+    if (!player) break; // hit the next block's title row, or ran out of data
+    const entry = {
+      pos: (pos || "").trim(),
+      player: (player || "").trim(),
+      club: (club || "").trim(),
+      price: toNum(price),
+      xpts: toNum(xpts),
+      order: toNum(order),
+    };
+    if ((role || "").trim().toLowerCase() === "bench") block.bench.push(entry);
+    else block.xi.push(entry);
+  }
+  block.bench.sort((a, b) => a.order - b.order);
+  return block.xi.length ? block : null;
 }
 
 // The Transfer plan table (AIXI!L14:U...) sits in the same published rows as
@@ -2647,6 +2702,27 @@ function renderAiFpl() {
     </div>
   `;
 
+  // Wildcard/Free Hit drafts (PLAN_WILDCARD/PLAN_FREE_HIT) - not yet
+  // confirmed, so they're shown separately from the real squad/GW blocks
+  // above. Reuses the exact same row renderer as the GW-by-GW cards below,
+  // since a draft block has the identical {formation, totalXpts, xi, bench}
+  // shape parseAiFplBlocks already produces.
+  document.getElementById("ai-plan-section").innerHTML = [
+    { plan: state.aiFplWildcardPlan, label: "Wildcard draft" },
+    { plan: state.aiFplFreeHitPlan, label: "Free Hit draft" },
+  ].filter((p) => p.plan).map(({ plan, label }) => `
+    <div class="ai-gw-card">
+      <div class="ai-gw-header">
+        <span>${escapeHtml(label)}</span>
+        <span>${escapeHtml(plan.formation)}</span>
+        <span>${plan.totalXpts.toFixed(2)} xPts</span>
+      </div>
+      <div class="ai-gw-section-label">Starting XI</div>
+      ${plan.xi.map(renderAiPlayerRow).join("")}
+      ${plan.bench.length ? `<div class="ai-gw-section-label">Bench</div>${plan.bench.map(renderAiPlayerRow).join("")}` : ""}
+    </div>
+  `).join("");
+
   const container = document.getElementById("ai-fpl-list");
   if (!blocks.length) {
     container.innerHTML = `<div class="empty-state">No AI FPL squad data yet.</div>`;
@@ -2791,6 +2867,8 @@ async function loadData() {
         state.aiFplTransfers = parseAiFplTransfers(rows);
         state.aiFplChipPlan = parseAiFplChipPlan(rows);
         state.aiFplSquad = parseAiFplCurrentSquad(rows);
+        state.aiFplWildcardPlan = parseAiFplPlanBlock(rows, "WILDCARD DRAFT");
+        state.aiFplFreeHitPlan = parseAiFplPlanBlock(rows, "FREE HIT DRAFT");
         renderAiFpl();
       })
       .catch((err) => {
@@ -3045,6 +3123,20 @@ document.getElementById("ai-transfers-btn").addEventListener("click", (e) => {
 document.getElementById("ai-confirm-btn").addEventListener("click", (e) => {
   if (!confirm("Confirm locks in this Gameweek's transfer(s) on the AIXI squad list. Only do this once you've actually made the moves in real FPL. Continue?")) return;
   runAiFplAction("confirm_transfers", e.target, "Confirm Transfers");
+});
+document.getElementById("ai-plan-wc-btn").addEventListener("click", (e) => {
+  runAiFplAction("plan_wildcard", e.target, "Plan Wildcard");
+});
+document.getElementById("ai-confirm-wc-btn").addEventListener("click", (e) => {
+  if (!confirm("This replaces your WHOLE current squad with the drafted Wildcard team. Only do this once you've actually played Wildcard in real FPL. Continue?")) return;
+  runAiFplAction("confirm_wildcard", e.target, "Confirm Wildcard");
+});
+document.getElementById("ai-plan-fh-btn").addEventListener("click", (e) => {
+  runAiFplAction("plan_free_hit", e.target, "Plan Free Hit");
+});
+document.getElementById("ai-confirm-fh-btn").addEventListener("click", (e) => {
+  if (!confirm("This replaces ONLY this Gameweek's Starting XI with the drafted Free Hit team - your actual squad is unaffected. Only do this once you've actually played Free Hit in real FPL. Continue?")) return;
+  runAiFplAction("confirm_free_hit", e.target, "Confirm Free Hit");
 });
 
 initAiFplAccess().then(loadData);
