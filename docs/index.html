@@ -568,15 +568,15 @@
   th.sortable { cursor: pointer; }
   th.sortable.active { color: var(--series-blue); }
 
+  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 10px; }
   .action-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-primary); border-radius: 8px; padding: 8px 12px;
-    font-size: 13px; font-weight: 600; font-family: inherit;
-    display: block; width: 100%; margin-bottom: 10px;
+    font-size: 13px; font-weight: 600; font-family: inherit; flex: 1;
   }
   .action-btn:active { opacity: 0.7; }
   .action-btn:disabled { opacity: 0.5; }
-  #ai-next-transfers, #ai-chip-plan, #ai-squad-section { margin-bottom: 16px; }
+  #ai-squad-section { margin-bottom: 16px; }
   .ai-fpl-status { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; min-height: 16px; }
   .ai-gw-card {
     background: var(--surface-1); border: 1px solid var(--border);
@@ -608,10 +608,10 @@
   .ai-top-row {
     display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;
   }
-  .ai-transfers-card, .ai-squad-card {
+  .ai-top-row > div { flex: 1 1 200px; min-width: 200px; }
+  .ai-transfers-card, .ai-squad-card, .ai-chip-card {
     background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px 12px;
-    flex: 1 1 260px; min-width: 260px;
+    border-radius: 10px; padding: 10px 12px; height: 100%;
   }
   .ai-transfers-title { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
   .ai-transfer-row {
@@ -635,10 +635,6 @@
     flex-shrink: 0; font-size: 10px; font-weight: 700; text-transform: uppercase;
     padding: 2px 6px; border-radius: 6px; background: var(--chip-bg); color: var(--text-secondary);
     white-space: nowrap;
-  }
-  .ai-chip-card {
-    background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 10px 12px;
   }
   .ai-chip-row { padding: 8px 0; }
   .ai-chip-row + .ai-chip-row { border-top: 1px solid var(--border); }
@@ -819,13 +815,16 @@
   </div>
 
   <section class="panel" data-tab="ai-fpl" hidden>
+    <div class="ai-fpl-actions">
+      <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
+      <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
+    </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
 
-    <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
-    <div id="ai-next-transfers"></div>
-
-    <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
-    <div id="ai-chip-plan"></div>
+    <div class="ai-top-row">
+      <div id="ai-next-transfers"></div>
+      <div id="ai-chip-plan"></div>
+    </div>
 
     <div id="ai-squad-section"></div>
 
@@ -2560,18 +2559,23 @@ function renderAiTransferRow(m) {
   `;
 }
 
+const CHIP_ABBREVIATIONS = {
+  "Triple Captain": "TC",
+  "Bench Boost": "BB",
+  "Wildcard": "WC",
+  "Free Hit": "FH",
+};
+
 function renderChipPlanRow(c) {
-  const metaParts = [];
-  if (c.bestGw) metaParts.push(`Best GW${c.bestGw}`);
+  const metaParts = [`GW${c.bestGw}`];
   if (c.extraXpts) metaParts.push(`+${c.extraXpts} xPts`);
-  if (c.detail) metaParts.push(c.detail);
   return `
     <div class="ai-chip-row">
       <div class="ai-chip-top">
-        <span class="ai-chip-name">${escapeHtml(c.name)}</span>
-        <span class="ai-chip-verdict ai-chip-verdict-${c.verdict.toLowerCase()}">${escapeHtml(c.verdict)}</span>
+        <span class="ai-chip-name">${escapeHtml(CHIP_ABBREVIATIONS[c.name] || c.name)}</span>
+        <span class="ai-chip-verdict ai-chip-verdict-play">PLAY</span>
       </div>
-      ${metaParts.length ? `<div class="ai-chip-meta">${escapeHtml(metaParts.join(" · "))}</div>` : ""}
+      <div class="ai-chip-meta">${escapeHtml(metaParts.join(" · "))}</div>
     </div>
   `;
 }
@@ -2597,12 +2601,31 @@ function renderAiFpl() {
     </div>
   `;
 
+  // Only the actionable question matters here: is there a chip worth
+  // playing somewhere between now (state.currentGw) and the last
+  // gameweek the plan actually covers - the title itself states that
+  // range ("Chip plan (GW3–GW6)"), which can run past the highest
+  // individual chip's own Best GW, so prefer parsing it from there and
+  // only fall back to the max Best GW if the title's shape ever changes.
+  const titleRangeMatch = chipPlan.title.match(/GW\d+\D+GW(\d+)/);
+  const chipLastGw = titleRangeMatch
+    ? Number(titleRangeMatch[1])
+    : chipPlan.chips.reduce((max, c) => Math.max(max, Number(c.bestGw) || 0), 0);
+  const playableChips = Number.isFinite(state.currentGw)
+    ? chipPlan.chips.filter((c) =>
+        c.verdict === "PLAY" && Number(c.bestGw) >= state.currentGw && Number(c.bestGw) <= chipLastGw
+      )
+    : chipPlan.chips.filter((c) => c.verdict === "PLAY");
+  const chipRangeLabel = Number.isFinite(state.currentGw) && chipLastGw
+    ? `GW${state.currentGw}&ndash;GW${chipLastGw}`
+    : "";
+
   document.getElementById("ai-chip-plan").innerHTML = `
     <div class="ai-chip-card">
-      <div class="ai-gw-header"><span>${chipPlan.title ? escapeHtml(chipPlan.title) : "Chip plan"}</span></div>
-      ${chipPlan.chips.length
-        ? chipPlan.chips.map(renderChipPlanRow).join("")
-        : `<div class="ai-transfers-title">No chip plan data yet - hit Update Transfers to check.</div>`}
+      <div class="ai-gw-header"><span>Chip plan${chipRangeLabel ? ` &middot; ${chipRangeLabel}` : ""}</span></div>
+      ${playableChips.length
+        ? playableChips.map(renderChipPlanRow).join("")
+        : `<div class="ai-transfers-title">No chip recommended${chipRangeLabel ? ` for ${chipRangeLabel}` : ""}.</div>`}
     </div>
   `;
 
