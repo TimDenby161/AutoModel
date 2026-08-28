@@ -438,10 +438,14 @@
   .standings-table { table-layout: fixed; font-size: 11px; }
   .standings-table th, .standings-table td { padding: 2px 3px; }
   .standings-table th:first-child, .standings-table td:first-child { width: 20px; padding-left: 0; }
-  .standings-table th:nth-child(3), .standings-table td:nth-child(3),
+  .standings-table th:nth-child(3), .standings-table td:nth-child(3) { width: 26px; }
+  /* W/D/L pulled visually closer together (tighter gutter between them)
+     while keeping each cell wide enough for a double-digit value. */
   .standings-table th:nth-child(4), .standings-table td:nth-child(4),
   .standings-table th:nth-child(5), .standings-table td:nth-child(5),
-  .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 26px; }
+  .standings-table th:nth-child(6), .standings-table td:nth-child(6) {
+    width: 22px; padding-left: 1px; padding-right: 1px;
+  }
   .standings-table th:nth-child(7), .standings-table td:nth-child(7) { width: 56px; }
   .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 30px; }
   .standings-table th:last-child, .standings-table td:last-child {
