@@ -347,7 +347,10 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
-  #table-view-toggle { margin-bottom: 10px; }
+  #table-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
+  #table-view-toggle .filter-chip {
+    flex: 1; text-align: center; padding: 10px; border-radius: 8px; font-size: 13px;
+  }
 
   @media (max-width: 480px) {
     header { padding: calc(env(safe-area-inset-top) + 6px) 10px 7px; }
@@ -425,18 +428,19 @@
   }
   table.leaderboard td.num, table.leaderboard th.num { text-align: right; font-variant-numeric: tabular-nums; }
   table.leaderboard tbody tr:active { background: var(--chip-bg); }
-  /* All 10 columns fit a phone-width screen without scrolling - narrow
-     numeric columns, Club takes whatever width is left over. */
+  /* All 9 columns fit a phone-width screen without scrolling - narrow
+     numeric columns, Club takes whatever width is left over. GF/GA are
+     merged into one "+/-" column (see renderTable) to free up room and
+     cut down on how squashed everything else gets. */
   .standings-table { table-layout: fixed; font-size: 11px; }
-  .standings-table th, .standings-table td { padding: 6px 3px; }
+  .standings-table th, .standings-table td { padding: 4px 3px; }
   .standings-table th:first-child, .standings-table td:first-child { width: 18px; padding-left: 0; }
   .standings-table th:nth-child(3), .standings-table td:nth-child(3),
   .standings-table th:nth-child(4), .standings-table td:nth-child(4),
   .standings-table th:nth-child(5), .standings-table td:nth-child(5),
   .standings-table th:nth-child(6), .standings-table td:nth-child(6) { width: 18px; }
-  .standings-table th:nth-child(7), .standings-table td:nth-child(7),
-  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 22px; }
-  .standings-table th:nth-child(9), .standings-table td:nth-child(9) { width: 26px; }
+  .standings-table th:nth-child(7), .standings-table td:nth-child(7) { width: 38px; }
+  .standings-table th:nth-child(8), .standings-table td:nth-child(8) { width: 26px; }
   .standings-table th:last-child, .standings-table td:last-child {
     width: 28px; font-weight: 700; padding-right: 0;
   }
@@ -673,8 +677,7 @@
             <th class="num">W</th>
             <th class="num">D</th>
             <th class="num">L</th>
-            <th class="num">GF</th>
-            <th class="num">GA</th>
+            <th class="num">+/-</th>
             <th class="num">GD</th>
             <th class="num">Pts</th>
           </tr>
@@ -2130,7 +2133,7 @@ function renderTable() {
   );
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="10"><div class="empty-state">No clubs found.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="9"><div class="empty-state">No clubs found.</div></td></tr>`;
     return;
   }
   const fmt = (n) => String(Math.round(n));
@@ -2142,8 +2145,7 @@ function renderTable() {
       <td class="num">${fmt(r.stats.w)}</td>
       <td class="num">${fmt(r.stats.d)}</td>
       <td class="num">${fmt(r.stats.l)}</td>
-      <td class="num">${fmt(r.stats.gf)}</td>
-      <td class="num">${fmt(r.stats.ga)}</td>
+      <td class="num">${fmt(r.stats.gf)}-${fmt(r.stats.ga)}</td>
       <td class="num">${fmt(r.stats.gd)}</td>
       <td class="num">${fmt(r.stats.pts)}</td>
     </tr>
@@ -2375,7 +2377,7 @@ async function loadData() {
       })
       .catch((err) => {
         console.error(err);
-        showLoadErrorRow(document.getElementById("table-body"), 10, "the table");
+        showLoadErrorRow(document.getElementById("table-body"), 9, "the table");
         throw err;
       }),
     // No dedicated tab/error UI for this one - it only powers the
