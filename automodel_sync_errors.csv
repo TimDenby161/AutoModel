@@ -1,12 +1,2 @@
 ﻿ID,Error
-1076335,'NoneType' object has no attribute 'get'
-1329747,'NoneType' object has no attribute 'get'
-621869,'NoneType' object has no attribute 'get'
-1203656,'NoneType' object has no attribute 'get'
-776161,'NoneType' object has no attribute 'get'
-956166,'NoneType' object has no attribute 'get'
-445873,'NoneType' object has no attribute 'get'
-940446,'NoneType' object has no attribute 'get'
-1302121,'NoneType' object has no attribute 'get'
-618718,'NoneType' object has no attribute 'get'
-1194286,'NoneType' object has no attribute 'get'
+815431,[WinError 10054] An existing connection was forcibly closed by the remote host
