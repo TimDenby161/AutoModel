@@ -361,8 +361,8 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
-  #table-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
-  #table-view-toggle .filter-chip {
+  #table-view-toggle, #matches-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
+  #table-view-toggle .filter-chip, #matches-view-toggle .filter-chip {
     flex: 1; text-align: center; padding: 6px 10px; border-radius: 8px; font-size: 13px;
   }
 
@@ -670,8 +670,7 @@
     </div>
   </div>
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="fixtures" aria-selected="true">Fixtures</button>
-    <button role="tab" data-tab="results" aria-selected="false">Results</button>
+    <button role="tab" data-tab="fixtures" aria-selected="true">Matches</button>
     <button role="tab" data-tab="table" aria-selected="false">Table</button>
     <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
     <button role="tab" data-tab="ai-fpl" aria-selected="false">AI FPL</button>
@@ -680,47 +679,54 @@
 
 <main>
   <section class="panel" data-tab="fixtures" data-active="true">
-    <div class="filters-wrap" id="fixture-filters">
-      <div class="filter-row"></div>
-      <div class="filter-row filter-row-more" hidden></div>
+    <div class="filter-row" id="matches-view-toggle">
+      <button type="button" class="filter-chip" data-view="fixtures" aria-pressed="true">Fixtures</button>
+      <button type="button" class="filter-chip" data-view="results" aria-pressed="false">Results</button>
     </div>
-    <div class="secondary-filters">
-      <div class="date-filter-group">
-        <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
-        <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
-        <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
-      </div>
-      <div class="round-filter-group" hidden>
-        <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
-        <select id="fixture-round-filter" class="round-filter-select" disabled>
-          <option value="">Select a league for rounds</option>
-        </select>
-        <button type="button" class="round-nav-btn" id="fixture-round-next" aria-label="Next round" disabled>&#8250;</button>
-      </div>
-    </div>
-    <div id="fixtures-list" class="card-list"></div>
-  </section>
 
-  <section class="panel" data-tab="results">
-    <div class="filters-wrap" id="result-filters">
-      <div class="filter-row"></div>
-      <div class="filter-row filter-row-more" hidden></div>
-    </div>
-    <div class="secondary-filters">
-      <div class="date-filter-group">
-        <button type="button" class="date-nav-btn" id="result-date-prev" aria-label="Previous day">&#8249;</button>
-        <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
-        <button type="button" class="date-nav-btn" id="result-date-next" aria-label="Next day">&#8250;</button>
+    <div id="fixtures-view">
+      <div class="filters-wrap" id="fixture-filters">
+        <div class="filter-row"></div>
+        <div class="filter-row filter-row-more" hidden></div>
       </div>
-      <div class="round-filter-group" hidden>
-        <button type="button" class="round-nav-btn" id="result-round-prev" aria-label="Previous round" disabled>&#8249;</button>
-        <select id="result-round-filter" class="round-filter-select" disabled>
-          <option value="">Select a league for rounds</option>
-        </select>
-        <button type="button" class="round-nav-btn" id="result-round-next" aria-label="Next round" disabled>&#8250;</button>
+      <div class="secondary-filters">
+        <div class="date-filter-group">
+          <button type="button" class="date-nav-btn" id="fixture-date-prev" aria-label="Previous day">&#8249;</button>
+          <input type="date" id="fixture-date-filter" class="date-filter-input" aria-label="Filter fixtures by date">
+          <button type="button" class="date-nav-btn" id="fixture-date-next" aria-label="Next day">&#8250;</button>
+        </div>
+        <div class="round-filter-group" hidden>
+          <button type="button" class="round-nav-btn" id="fixture-round-prev" aria-label="Previous round" disabled>&#8249;</button>
+          <select id="fixture-round-filter" class="round-filter-select" disabled>
+            <option value="">Select a league for rounds</option>
+          </select>
+          <button type="button" class="round-nav-btn" id="fixture-round-next" aria-label="Next round" disabled>&#8250;</button>
+        </div>
       </div>
+      <div id="fixtures-list" class="card-list"></div>
     </div>
-    <div id="results-list" class="card-list"></div>
+
+    <div id="results-view" hidden>
+      <div class="filters-wrap" id="result-filters">
+        <div class="filter-row"></div>
+        <div class="filter-row filter-row-more" hidden></div>
+      </div>
+      <div class="secondary-filters">
+        <div class="date-filter-group">
+          <button type="button" class="date-nav-btn" id="result-date-prev" aria-label="Previous day">&#8249;</button>
+          <input type="date" id="result-date-filter" class="date-filter-input" aria-label="Filter results by date">
+          <button type="button" class="date-nav-btn" id="result-date-next" aria-label="Next day">&#8250;</button>
+        </div>
+        <div class="round-filter-group" hidden>
+          <button type="button" class="round-nav-btn" id="result-round-prev" aria-label="Previous round" disabled>&#8249;</button>
+          <select id="result-round-filter" class="round-filter-select" disabled>
+            <option value="">Select a league for rounds</option>
+          </select>
+          <button type="button" class="round-nav-btn" id="result-round-next" aria-label="Next round" disabled>&#8250;</button>
+        </div>
+      </div>
+      <div id="results-list" class="card-list"></div>
+    </div>
   </section>
 
   <section class="panel" data-tab="table">
@@ -913,7 +919,7 @@ const state = {
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
   currentGw: null,
-  fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
+  fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current", matchesView: "fixtures",
   // Competition names the user has collapsed in Fixtures/Results - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
   // just the DOM.
@@ -2990,6 +2996,16 @@ document.querySelectorAll("#table-view-toggle .filter-chip[data-view]").forEach(
     btn.setAttribute("aria-pressed", "true");
     state.tableView = btn.dataset.view;
     renderTable();
+  });
+});
+
+document.querySelectorAll("#matches-view-toggle .filter-chip[data-view]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#matches-view-toggle .filter-chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.matchesView = btn.dataset.view;
+    document.getElementById("fixtures-view").hidden = state.matchesView !== "fixtures";
+    document.getElementById("results-view").hidden = state.matchesView !== "results";
   });
 });
 
