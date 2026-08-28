@@ -875,6 +875,7 @@ const state = {
   fplSortKey: "xpts", fplSortDir: -1,
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
+  currentGw: null,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
   // Competition names the user has collapsed in Fixtures/Results - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
@@ -2416,9 +2417,9 @@ function renderAiPlayerRow(p) {
 // way.
 const SQUAD_PITCH_ORDER = ["GK", "DEF", "MID", "FWD"];
 
-function renderSquadPitchPlayer(p) {
+function renderSquadPitchPlayer(p, isBenched) {
   return `
-    <div class="pitch-player ${minsColorClass(p.mins)}">
+    <div class="pitch-player ${isBenched ? "mins-red" : minsColorClass(p.mins)}">
       <span class="pitch-player-pos">${escapeHtml(p.pos)}</span>
       <span class="pitch-player-name">${escapeHtml(p.player)}</span>
       <span class="pitch-player-price">&pound;${p.price.toFixed(1)}</span>
@@ -2427,12 +2428,46 @@ function renderSquadPitchPlayer(p) {
   `;
 }
 
+function sumTopXpts(list, n) {
+  return list.slice(0, n).reduce((sum, p) => sum + p.xpts, 0);
+}
+
+// The AI's own GW-by-GW XI/bench plan (parseAiFplBlocks) only covers next
+// week onward - it doesn't cover the *current* gameweek, since that's
+// already locked in. So for "who'd you bench right now", pick our own best
+// starting XI from the squad's current-GW xPts column (parseAiFplCurrentSquad's
+// "xpts" field - FPL!P2 confirms which GW that column actually is), subject
+// to standard FPL formation rules: 1 GK, DEF 3-5, MID 2-5, FWD 1-3, 11
+// total. Everyone not in that XI is "benched".
+function computeCurrentGwBench(squad) {
+  const byPos = { GK: [], DEF: [], MID: [], FWD: [] };
+  squad.forEach((p) => { if (byPos[p.pos]) byPos[p.pos].push(p); });
+  Object.values(byPos).forEach((list) => list.sort((a, b) => b.xpts - a.xpts));
+
+  const benched = [...byPos.GK.slice(1)];
+
+  let best = null;
+  for (let d = 3; d <= Math.min(5, byPos.DEF.length); d++) {
+    for (let m = 2; m <= Math.min(5, byPos.MID.length); m++) {
+      const f = 10 - d - m;
+      if (f < 1 || f > Math.min(3, byPos.FWD.length)) continue;
+      const total = sumTopXpts(byPos.DEF, d) + sumTopXpts(byPos.MID, m) + sumTopXpts(byPos.FWD, f);
+      if (!best || total > best.total) best = { d, m, f, total };
+    }
+  }
+  if (best) {
+    benched.push(...byPos.DEF.slice(best.d), ...byPos.MID.slice(best.m), ...byPos.FWD.slice(best.f));
+  }
+  return new Set(benched.map((p) => p.player));
+}
+
 function renderSquadPitch(squad) {
   if (!squad.length) return `<div class="empty-state">No current squad data yet.</div>`;
+  const benchedNames = computeCurrentGwBench(squad);
   const body = SQUAD_PITCH_ORDER.map((pos) => {
     const players = squad.filter((p) => p.pos === pos);
     if (!players.length) return "";
-    return `<div class="pitch-group">${players.map(renderSquadPitchPlayer).join("")}</div>`;
+    return `<div class="pitch-group">${players.map((p) => renderSquadPitchPlayer(p, benchedNames.has(p.player))).join("")}</div>`;
   }).join("");
   return `<div class="lineup-pitch squad-pitch">${body}</div>`;
 }
@@ -2468,7 +2503,10 @@ function renderAiFpl() {
 
   const squadHtml = `
     <div class="ai-squad-card">
-      <div class="ai-gw-header"><span>Current Squad</span><span>${squad.length}</span></div>
+      <div class="ai-gw-header">
+        <span>Current Squad${state.currentGw ? ` &middot; GW${state.currentGw} bench in red` : ""}</span>
+        <span>${squad.length}</span>
+      </div>
       ${renderSquadPitch(squad)}
     </div>
   `;
@@ -2577,8 +2615,14 @@ async function loadData() {
         const fpl = sheetRowsToObjects(values, 1);
         attachFplXptsNext(fpl, values);
         state.fpl = fpl;
+        // FPL!P2 - the real header row's first per-GW column label (e.g.
+        // "2" for GW2) - not hardcoded since this shifts forward every
+        // week. Used to label which gameweek the squad pitch's bench pick
+        // is actually for.
+        state.currentGw = toNum(values[1] && values[1][15]);
         populateFplClubFilter();
         renderFpl();
+        renderAiFpl();
       })
       .catch((err) => {
         console.error(err);
