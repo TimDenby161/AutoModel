@@ -416,6 +416,23 @@
     border: 1px solid var(--border); background: var(--surface-1);
     color: var(--text-primary); font-size: 14px; font-family: inherit;
   }
+  .fpl-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .fpl-pos-filters { display: flex; gap: 6px; }
+  .fpl-pos-checkbox {
+    display: flex; align-items: center; gap: 4px;
+    border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-secondary); font-size: 12px; font-weight: 600;
+    padding: 6px 10px; border-radius: 20px; cursor: pointer; user-select: none;
+  }
+  .fpl-pos-checkbox input { margin: 0; accent-color: var(--series-blue); }
+  .fpl-club-select {
+    appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
+    color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 6px 10px; border-radius: 20px; flex: 1; min-width: 0;
+  }
 
   table.leaderboard { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.leaderboard th, table.leaderboard td {
@@ -698,6 +715,17 @@
     <div class="search-row">
       <input id="fpl-search" type="search" placeholder="Search players or clubs&hellip;" autocomplete="off">
     </div>
+    <div class="fpl-filters">
+      <div class="fpl-pos-filters" id="fpl-pos-filters">
+        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="G" checked> G</label>
+        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="D" checked> D</label>
+        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="M" checked> M</label>
+        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="F" checked> F</label>
+      </div>
+      <select id="fpl-club-filter" class="fpl-club-select">
+        <option value="">All Clubs</option>
+      </select>
+    </div>
     <div style="overflow-x:auto;">
       <table class="leaderboard fpl-table-compact" id="fpl-table">
         <thead>
@@ -791,6 +819,7 @@ let aiFplAccessUnlocked = false;
 const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
   fplSortKey: "xpts", fplSortDir: -1,
+  fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
   // Competition names the user has collapsed in Fixtures/Results - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
@@ -1974,6 +2003,20 @@ function fplRow(p) {
   };
 }
 
+// Rebuilds the Club dropdown's options from whatever clubs are actually in
+// state.fpl, alphabetically - only called once after the FPL tab's data
+// loads (not on every renderFpl), so it doesn't reset the user's selection
+// on every re-render/refresh.
+function populateFplClubFilter() {
+  const select = document.getElementById("fpl-club-filter");
+  const previous = select.value;
+  const clubs = [...new Set(state.fpl.map((p) => p.Club).filter(Boolean))].sort();
+  select.innerHTML =
+    `<option value="">All Clubs</option>` +
+    clubs.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  if (clubs.includes(previous)) select.value = previous;
+}
+
 function renderFpl() {
   const body = document.getElementById("fpl-body");
   const query = document.getElementById("fpl-search").value.trim().toLowerCase();
@@ -1983,6 +2026,10 @@ function renderFpl() {
     rows = rows.filter((r) =>
       r.name.toLowerCase().includes(query) || r.club.toLowerCase().includes(query)
     );
+  }
+  rows = rows.filter((r) => state.fplPosFilter.has(r.pos));
+  if (state.fplClubFilter) {
+    rows = rows.filter((r) => r.club === state.fplClubFilter);
   }
   rows.sort((a, b) => (toNum(a[state.fplSortKey]) - toNum(b[state.fplSortKey])) * state.fplSortDir);
   rows = rows.slice(0, 100);
@@ -2387,6 +2434,7 @@ async function loadData() {
         const fpl = sheetRowsToObjects(values, 1);
         attachFplXptsNext(fpl, values);
         state.fpl = fpl;
+        populateFplClubFilter();
         renderFpl();
       })
       .catch((err) => {
@@ -2548,6 +2596,17 @@ function wireSortableTable(tableId, sortKeyProp, sortDirProp, renderFn) {
 
 document.getElementById("refresh-btn").addEventListener("click", loadData);
 document.getElementById("fpl-search").addEventListener("input", renderFpl);
+document.querySelectorAll("#fpl-pos-filters input[data-pos]").forEach((checkbox) => {
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) state.fplPosFilter.add(checkbox.dataset.pos);
+    else state.fplPosFilter.delete(checkbox.dataset.pos);
+    renderFpl();
+  });
+});
+document.getElementById("fpl-club-filter").addEventListener("change", (e) => {
+  state.fplClubFilter = e.target.value;
+  renderFpl();
+});
 wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 
 // Fixture cards are rebuilt wholesale on every render, so this listens on
