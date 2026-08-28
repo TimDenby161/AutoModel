@@ -525,28 +525,30 @@
   .team-fixture-meta { font-size: 11px; color: var(--text-muted); }
   .team-fixture-row .match-teams { margin-top: 4px; }
   .team-fixture-row .match-team.is-me { color: var(--series-blue); }
-  /* Player/Price/Mins stay pinned on the left while xPts/2GW/5GW/6GW/xG/xA/Def
-     scroll underneath - compact padding+font so more of the scrolling half
-     fits on screen at once too. */
-  .fpl-table-compact { font-size: 11px; table-layout: fixed; width: 460px; }
+  .player-modal-stats {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .player-modal-stat { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .player-modal-stat-label { color: var(--text-muted); }
+  .player-modal-stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .player-modal-fixtures-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+    color: var(--text-muted); margin: 10px 0 2px;
+  }
+  /* Just the core scanning columns (name/pos/price/expected points) - full
+     player detail (club, xG, xA, Def, next fixtures) lives in the tap-to-open
+     player modal instead, so this no longer needs the old frozen-column
+     horizontal-scroll layout to fit everything at once. */
+  .fpl-table-compact { font-size: 12px; table-layout: fixed; width: 100%; }
   .fpl-table-compact th, .fpl-table-compact td { padding: 6px 4px; }
-  .fpl-table-compact th:nth-child(1), .fpl-table-compact td:nth-child(1),
-  .fpl-table-compact th:nth-child(2), .fpl-table-compact td:nth-child(2),
-  .fpl-table-compact th:nth-child(3), .fpl-table-compact td:nth-child(3) {
-    position: sticky; background: var(--page-plane); z-index: 1;
+  .fpl-table-compact th:first-child, .fpl-table-compact td:first-child {
+    width: auto; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .fpl-table-compact th:nth-child(1), .fpl-table-compact th:nth-child(2), .fpl-table-compact th:nth-child(3) {
-    z-index: 2;
-  }
-  .fpl-table-compact th:nth-child(1), .fpl-table-compact td:nth-child(1) { left: 0; width: 100px; }
-  .fpl-table-compact th:nth-child(2), .fpl-table-compact td:nth-child(2) { left: 100px; width: 42px; }
-  .fpl-table-compact th:nth-child(3), .fpl-table-compact td:nth-child(3) {
-    left: 142px; width: 38px;
-    box-shadow: 2px 0 4px -2px rgba(11, 11, 11, 0.15);
-  }
-  .fpl-table-compact .player-name { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; }
-  .fpl-table-compact .player-sub { font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; }
-  .fpl-table-compact th:nth-child(n+4), .fpl-table-compact td:nth-child(n+4) { width: 40px; }
+  .fpl-table-compact th:nth-child(2), .fpl-table-compact td:nth-child(2) { width: 26px; }
+  .fpl-table-compact th:nth-child(n+3), .fpl-table-compact td:nth-child(n+3) { width: 44px; }
+  .fpl-table-compact tbody tr { cursor: pointer; }
+  .fpl-table-compact tbody tr:active { background: var(--chip-bg); }
   .player-name { font-weight: 600; }
   .player-sub { color: var(--text-muted); font-size: 11px; }
   th.sortable { cursor: pointer; }
@@ -765,21 +767,28 @@
         <thead>
           <tr>
             <th>Player</th>
+            <th class="num">Pos</th>
             <th class="num sortable" data-key="price">Price</th>
-            <th class="num sortable" data-key="mins">Mins</th>
             <th class="num sortable" data-key="xpts">xPts</th>
             <th class="num sortable" data-key="gw2">2GW</th>
             <th class="num sortable" data-key="gw5">5GW</th>
             <th class="num sortable" data-key="gw6">6GW</th>
-            <th class="num sortable" data-key="xg">xG</th>
-            <th class="num sortable" data-key="xa">xA</th>
-            <th class="num sortable" data-key="def">Def</th>
           </tr>
         </thead>
         <tbody id="fpl-body"></tbody>
       </table>
     </div>
   </section>
+
+  <div class="modal-overlay" id="player-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <span id="player-modal-title"></span>
+        <button type="button" class="modal-close" id="player-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div id="player-modal-body"></div>
+    </div>
+  </div>
 
   <section class="panel" data-tab="ai-fpl" hidden>
     <div class="ai-fpl-actions">
@@ -848,6 +857,11 @@ const CONFIG = {
 // a manual Refresh afterward must not silently reset whatever filter/date/
 // round the user has since chosen.
 let initialDefaultsApplied = false;
+// The exact filtered/sorted row objects behind the FPL table's most recent
+// render - the click-to-open player modal looks a row up by its position
+// in this array (data-fpl-idx) rather than re-deriving it, so the modal
+// always matches exactly what's on screen.
+let fplLastRows = [];
 let aiFplAccessUnlocked = false;
 
 const state = {
@@ -2070,25 +2084,21 @@ function renderFpl() {
   rows.sort((a, b) => (toNum(a[state.fplSortKey]) - toNum(b[state.fplSortKey])) * state.fplSortDir);
   rows = rows.slice(0, 100);
 
+  fplLastRows = rows;
+
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="10"><div class="empty-state">No matching players.</div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state">No matching players.</div></td></tr>`;
     return;
   }
-  body.innerHTML = rows.map((r) => `
-    <tr>
-      <td>
-        <div class="player-name">${escapeHtml(r.name)}</div>
-        <div class="player-sub">${escapeHtml(r.club)}${r.pos ? " &middot; " + escapeHtml(r.pos) : ""}</div>
-      </td>
+  body.innerHTML = rows.map((r, i) => `
+    <tr data-fpl-idx="${i}">
+      <td class="player-name">${escapeHtml(r.name)}</td>
+      <td class="num">${escapeHtml(r.pos)}</td>
       <td class="num">${r.price.toFixed(1)}</td>
-      <td class="num">${r.mins}</td>
       <td class="num">${r.xpts.toFixed(2)}</td>
       <td class="num">${r.gw2.toFixed(2)}</td>
       <td class="num">${r.gw5.toFixed(2)}</td>
       <td class="num">${r.gw6.toFixed(2)}</td>
-      <td class="num">${r.xg.toFixed(2)}</td>
-      <td class="num">${r.xa.toFixed(2)}</td>
-      <td class="num">${r.def === null ? "&ndash;" : r.def.toFixed(2)}</td>
     </tr>
   `).join("");
 }
@@ -2311,8 +2321,75 @@ document.getElementById("team-fixtures-close").addEventListener("click", closeTe
 document.getElementById("team-fixtures-modal").addEventListener("click", (e) => {
   if (e.target.id === "team-fixtures-modal") closeTeamFixturesModal();
 });
+// Maps FPL's "Club" text to the Club tab's "Name" text where they differ -
+// currently just one naming quirk found by checking live data ("Nottm
+// Forest" vs "Nottingham Forest"); every other club matches exactly.
+const FPL_CLUB_NAME_ALIASES = { "Nottm Forest": "Nottingham Forest" };
+
+function clubIdByName(clubName) {
+  const canonicalName = FPL_CLUB_NAME_ALIASES[clubName] || clubName;
+  const match = state.club.find((c) => c.Name === canonicalName);
+  return match ? String(match["Club ID"] || "").trim() : "";
+}
+
+function openPlayerModal(r) {
+  document.getElementById("player-modal-title").textContent = r.name;
+  const body = document.getElementById("player-modal-body");
+  const clubId = clubIdByName(r.club);
+  const fixtures = clubId ? teamNextFixtures(clubId, 5) : [];
+
+  const stat = (label, value) =>
+    `<div class="player-modal-stat"><span class="player-modal-stat-label">${label}</span><span class="player-modal-stat-value">${value}</span></div>`;
+  const statsHtml = `
+    <div class="player-modal-stats">
+      ${stat("Club", escapeHtml(r.club))}
+      ${stat("Position", escapeHtml(r.pos))}
+      ${stat("Price", `&pound;${r.price.toFixed(1)}`)}
+      ${stat("xG", r.xg.toFixed(2))}
+      ${stat("xA", r.xa.toFixed(2))}
+      ${stat("Def", r.def === null ? "&ndash;" : r.def.toFixed(2))}
+    </div>
+  `;
+
+  const fixturesHtml = fixtures.length
+    ? fixtures.map((m) => {
+        const isHome = String(m.ID_1) === clubId;
+        const compLabel = COMPETITION_LABELS[String(m.ID || "").trim()] || m.League || "";
+        return `
+          <div class="team-fixture-row">
+            <div class="team-fixture-meta">${escapeHtml(compLabel)} &middot; ${escapeHtml(formatKickoff(m.Date))}</div>
+            <div class="match-teams">
+              <div class="match-team ${isHome ? "is-me" : ""}">${escapeHtml(m.Home)}</div>
+              ${matchScoreCenter(m)}
+              <div class="match-team away ${!isHome ? "is-me" : ""}">${escapeHtml(m.Away)}</div>
+            </div>
+            ${matchProbsRow(m)}
+          </div>
+        `;
+      }).join("")
+    : `<div class="empty-state">No upcoming fixtures found.</div>`;
+
+  body.innerHTML = statsHtml + `<div class="player-modal-fixtures-title">Next fixtures</div>` + fixturesHtml;
+  document.getElementById("player-modal").hidden = false;
+}
+
+function closePlayerModal() {
+  document.getElementById("player-modal").hidden = true;
+}
+
+document.getElementById("fpl-body").addEventListener("click", (e) => {
+  const row = e.target.closest("tr[data-fpl-idx]");
+  if (!row) return;
+  const r = fplLastRows[Number(row.dataset.fplIdx)];
+  if (r) openPlayerModal(r);
+});
+document.getElementById("player-modal-close").addEventListener("click", closePlayerModal);
+document.getElementById("player-modal").addEventListener("click", (e) => {
+  if (e.target.id === "player-modal") closePlayerModal();
+});
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeTeamFixturesModal();
+  if (e.key === "Escape") { closeTeamFixturesModal(); closePlayerModal(); }
 });
 
 function renderAiPlayerRow(p) {
