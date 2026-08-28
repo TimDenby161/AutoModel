@@ -513,6 +513,8 @@
   .standings-table tbody tr:active { background: var(--chip-bg); }
   .standings-table tbody tr.relegation-row { background: color-mix(in srgb, var(--status-critical) 16%, var(--surface-1)); }
   .standings-table tbody tr.relegation-row:active { background: color-mix(in srgb, var(--status-critical) 30%, var(--surface-1)); }
+  .standings-table tbody tr.qualification-row { background: color-mix(in srgb, var(--status-good) 16%, var(--surface-1)); }
+  .standings-table tbody tr.qualification-row:active { background: color-mix(in srgb, var(--status-good) 30%, var(--surface-1)); }
 
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
@@ -1017,6 +1019,28 @@ const LEAGUE_FILTERS = {
 const RELEGATION_ZONE_SIZE = {
   pl: 3, champ: 3, l1: 4, l2: 2, nl: 4,
   bl: 2, ll: 3, seriea: 3, fr: 2, tur: 3, sau: 3, bra: 4,
+};
+
+// Top-N automatic-promotion / automatic-continental-qualification zone size
+// per league, for the green row highlight in renderTable - same "certain
+// only" rule as RELEGATION_ZONE_SIZE: a play-off or qualifying-round-only
+// berth doesn't count, only a guaranteed spot by table position alone.
+// League One/Two/National League: automatic promotion places (their
+// play-off places are excluded, same as their relegation zones exclude
+// play-off-risk spots). pl/bl/ll/seriea: the standard top-4 Champions
+// League base allocation - deliberately NOT the occasional 5th
+// "European Performance Spot" some associations earn, since that's
+// awarded by an individual club's own prior European results, not this
+// season's table position, so it can't be shown as a position-based zone.
+// fr/tur: only the automatic league-phase berth(s) - Ligue 1's 3rd place
+// and Süper Lig's 2nd place both only earn a qualifying-round/play-off
+// route in, not a certain spot. sau/bra: Saudi Pro League's AFC Champions
+// League Elite and Brazil's Copa Libertadores access both mix in cup
+// results alongside table position, so these two are the least certain
+// entries here - flagged as such, correct if wrong.
+const QUALIFICATION_ZONE_SIZE = {
+  pl: 4, champ: 2, l1: 2, l2: 3, nl: 1,
+  bl: 4, ll: 4, seriea: 4, fr: 2, tur: 1, sau: 4, bra: 6,
 };
 
 // Used only by Fixtures/Results (see buildCompetitionList/competitionIdsFor)
@@ -2333,11 +2357,14 @@ function renderTable() {
     return;
   }
   const relZoneSize = RELEGATION_ZONE_SIZE[state.tableFilter] || 0;
+  const qualZoneSize = QUALIFICATION_ZONE_SIZE[state.tableFilter] || 0;
   const fmt = (n) => String(Math.round(n));
   body.innerHTML = rows.map((r, i) => {
     const inRelZone = relZoneSize > 0 && i >= rows.length - relZoneSize;
+    const inQualZone = qualZoneSize > 0 && i < qualZoneSize;
+    const rowClass = inRelZone ? "relegation-row" : inQualZone ? "qualification-row" : "";
     return `
-    <tr class="${inRelZone ? "relegation-row" : ""}" data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
+    <tr class="${rowClass}" data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
       <td>${escapeHtml(tableDisplayName(r.name))}</td>
       <td class="num">${fmt(r.stats.pl)}</td>
