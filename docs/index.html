@@ -25,6 +25,7 @@
     --status-good:    #0ca30c;
     --status-critical:#d03b3b;
     --status-warning: #d19d00;
+    --mins-orange:    #f0993d;
     --chip-bg:        #f0efec;
   }
   @media (prefers-color-scheme: dark) {
@@ -43,6 +44,7 @@
       --status-good:    #0ca30c;
       --status-critical:#e66767;
       --status-warning: #f5c518;
+      --mins-orange:    #ffab5e;
       --chip-bg:        #26261f;
     }
   }
@@ -61,6 +63,7 @@
     --status-good:    #0ca30c;
     --status-critical:#e66767;
     --status-warning: #e0b636;
+    --mins-orange:    #ffab5e;
     --chip-bg:        #26261f;
   }
 
@@ -181,7 +184,7 @@
      mins-tier color, overriding each element's own default color below. */
   .pitch-player.mins-green *  { color: var(--status-good); }
   .pitch-player.mins-yellow * { color: var(--status-warning); }
-  .pitch-player.mins-orange * { color: var(--series-orange); }
+  .pitch-player.mins-orange * { color: var(--mins-orange); }
   .pitch-player.mins-red *    { color: var(--status-critical); }
   .pitch-player-ability {
     color: var(--text-muted); font-weight: 600; font-size: 11px;
