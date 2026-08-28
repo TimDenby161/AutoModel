@@ -421,13 +421,6 @@
     margin-bottom: 10px;
   }
   .fpl-pos-filters { display: flex; gap: 6px; }
-  .fpl-pos-checkbox {
-    display: flex; align-items: center; gap: 4px;
-    border: 1px solid var(--border); background: var(--chip-bg);
-    color: var(--text-secondary); font-size: 12px; font-weight: 600;
-    padding: 6px 10px; border-radius: 20px; cursor: pointer; user-select: none;
-  }
-  .fpl-pos-checkbox input { margin: 0; accent-color: var(--series-blue); }
   .fpl-club-select {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
@@ -717,10 +710,10 @@
     </div>
     <div class="fpl-filters">
       <div class="fpl-pos-filters" id="fpl-pos-filters">
-        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="G" checked> G</label>
-        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="D" checked> D</label>
-        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="M" checked> M</label>
-        <label class="fpl-pos-checkbox"><input type="checkbox" data-pos="F" checked> F</label>
+        <button type="button" class="filter-chip" data-pos="G" aria-pressed="true">G</button>
+        <button type="button" class="filter-chip" data-pos="D" aria-pressed="true">D</button>
+        <button type="button" class="filter-chip" data-pos="M" aria-pressed="true">M</button>
+        <button type="button" class="filter-chip" data-pos="F" aria-pressed="true">F</button>
       </div>
       <select id="fpl-club-filter" class="fpl-club-select">
         <option value="">All Clubs</option>
@@ -2596,10 +2589,12 @@ function wireSortableTable(tableId, sortKeyProp, sortDirProp, renderFn) {
 
 document.getElementById("refresh-btn").addEventListener("click", loadData);
 document.getElementById("fpl-search").addEventListener("input", renderFpl);
-document.querySelectorAll("#fpl-pos-filters input[data-pos]").forEach((checkbox) => {
-  checkbox.addEventListener("change", () => {
-    if (checkbox.checked) state.fplPosFilter.add(checkbox.dataset.pos);
-    else state.fplPosFilter.delete(checkbox.dataset.pos);
+document.querySelectorAll("#fpl-pos-filters [data-pos]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const nowOn = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", String(nowOn));
+    if (nowOn) state.fplPosFilter.add(btn.dataset.pos);
+    else state.fplPosFilter.delete(btn.dataset.pos);
     renderFpl();
   });
 });
