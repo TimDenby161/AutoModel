@@ -2339,8 +2339,8 @@ function openPlayerModal(r) {
     <div class="player-modal-stats">
       ${stat("Club", escapeHtml(r.club))}
       ${stat("Position", escapeHtml(r.pos))}
-      ${stat("Price", `&pound;${r.price.toFixed(1)}`)}
       ${stat("xG", r.xg.toFixed(2))}
+      ${stat("Price", `&pound;${r.price.toFixed(1)}`)}
       ${stat("xA", r.xa.toFixed(2))}
       ${stat("Def", r.def === null ? "&ndash;" : r.def.toFixed(2))}
     </div>
