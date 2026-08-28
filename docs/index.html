@@ -426,6 +426,40 @@
     color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 600;
     padding: 6px 10px; border-radius: 20px; flex: 1; min-width: 0;
   }
+  .fpl-price-filter { margin-bottom: 12px; }
+  .fpl-price-label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  #fpl-price-display { color: var(--series-blue); font-variant-numeric: tabular-nums; }
+  /* Two range inputs stacked on the same track - each input is fully
+     transparent except its thumb (pointer-events:none on the input itself
+     so clicks fall through to whichever thumb is on top), giving the
+     classic dual-handle slider look/feel from a single pair of native
+     <input type="range"> elements. */
+  .price-slider { position: relative; height: 24px; }
+  .price-slider input[type="range"] {
+    position: absolute; left: 0; top: 8px; width: 100%; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent;
+    pointer-events: none;
+  }
+  .price-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; background: var(--border); border-radius: 2px;
+  }
+  .price-slider input[type="range"]::-moz-range-track {
+    height: 4px; background: var(--border); border-radius: 2px;
+  }
+  .price-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; pointer-events: auto;
+    width: 16px; height: 16px; margin-top: -6px; border-radius: 50%;
+    background: var(--series-blue); border: 2px solid var(--surface-1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+  }
+  .price-slider input[type="range"]::-moz-range-thumb {
+    pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--series-blue); border: 2px solid var(--surface-1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+  }
 
   table.leaderboard { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.leaderboard th, table.leaderboard td {
@@ -719,6 +753,13 @@
         <option value="">All Clubs</option>
       </select>
     </div>
+    <div class="fpl-price-filter">
+      <span class="fpl-price-label">Price: <span id="fpl-price-display">&pound;4.0 &ndash; &pound;15.5</span></span>
+      <div class="price-slider">
+        <input type="range" id="fpl-price-min" min="4" max="15.5" step="0.5" value="4" aria-label="Minimum price">
+        <input type="range" id="fpl-price-max" min="4" max="15.5" step="0.5" value="15.5" aria-label="Maximum price">
+      </div>
+    </div>
     <div style="overflow-x:auto;">
       <table class="leaderboard fpl-table-compact" id="fpl-table">
         <thead>
@@ -813,6 +854,7 @@ const state = {
   fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
+  fplPriceMin: 4, fplPriceMax: 15.5,
   fixtureFilter: "all", resultFilter: "all", tableFilter: "pl", tableView: "current",
   // Competition names the user has collapsed in Fixtures/Results - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
@@ -2024,6 +2066,7 @@ function renderFpl() {
   if (state.fplClubFilter) {
     rows = rows.filter((r) => r.club === state.fplClubFilter);
   }
+  rows = rows.filter((r) => r.price >= state.fplPriceMin && r.price <= state.fplPriceMax);
   rows.sort((a, b) => (toNum(a[state.fplSortKey]) - toNum(b[state.fplSortKey])) * state.fplSortDir);
   rows = rows.slice(0, 100);
 
@@ -2602,6 +2645,34 @@ document.getElementById("fpl-club-filter").addEventListener("change", (e) => {
   state.fplClubFilter = e.target.value;
   renderFpl();
 });
+
+// Classic dual-range-input pattern: each slider clamps against the other
+// so the min handle can never pass the max handle and vice versa.
+const fplPriceMinInput = document.getElementById("fpl-price-min");
+const fplPriceMaxInput = document.getElementById("fpl-price-max");
+const fplPriceDisplay = document.getElementById("fpl-price-display");
+
+function updateFplPriceDisplay() {
+  fplPriceDisplay.textContent = `£${state.fplPriceMin.toFixed(1)} – £${state.fplPriceMax.toFixed(1)}`;
+}
+
+fplPriceMinInput.addEventListener("input", () => {
+  const max = parseFloat(fplPriceMaxInput.value);
+  let min = Math.min(parseFloat(fplPriceMinInput.value), max);
+  fplPriceMinInput.value = min;
+  state.fplPriceMin = min;
+  updateFplPriceDisplay();
+  renderFpl();
+});
+fplPriceMaxInput.addEventListener("input", () => {
+  const min = parseFloat(fplPriceMinInput.value);
+  let max = Math.max(parseFloat(fplPriceMaxInput.value), min);
+  fplPriceMaxInput.value = max;
+  state.fplPriceMax = max;
+  updateFplPriceDisplay();
+  renderFpl();
+});
+
 wireSortableTable("fpl-table", "fplSortKey", "fplSortDir", renderFpl);
 
 // Fixture cards are rebuilt wholesale on every render, so this listens on
