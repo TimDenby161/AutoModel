@@ -2120,6 +2120,16 @@ function renderLineupPanel(homeId, awayId, homeName, awayName) {
   `;
 }
 
+// A couple of full club names wrap onto a second line in the Table tab's
+// narrow Club column - shortened for display there only. Everywhere else
+// (the team fixtures modal's title, Fixtures/Results, etc.) keeps the full
+// name, since only the Table tab is this tight on width.
+const TABLE_SHORT_NAMES = {
+  "Wolverhampton Wanderers": "Wolves",
+  "Borussia Mönchengladbach": "Mönchengladbach",
+};
+const tableDisplayName = (name) => TABLE_SHORT_NAMES[name] || name;
+
 function renderTable() {
   const body = document.getElementById("table-body");
   const leagueIds = LEAGUE_FILTERS[state.tableFilter];
@@ -2142,7 +2152,7 @@ function renderTable() {
   body.innerHTML = rows.map((r, i) => `
     <tr data-club-id="${escapeHtml(r.id)}" data-club-name="${escapeHtml(r.name)}">
       <td>${i + 1}</td>
-      <td>${escapeHtml(r.name)}</td>
+      <td>${escapeHtml(tableDisplayName(r.name))}</td>
       <td class="num">${fmt(r.stats.pl)}</td>
       <td class="num">${fmt(r.stats.w)}</td>
       <td class="num">${fmt(r.stats.d)}</td>
