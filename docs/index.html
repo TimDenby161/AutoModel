@@ -568,14 +568,15 @@
   th.sortable { cursor: pointer; }
   th.sortable.active { color: var(--series-blue); }
 
-  .ai-fpl-actions { display: flex; gap: 8px; margin-bottom: 10px; }
   .action-btn {
     appearance: none; border: 1px solid var(--border); background: var(--chip-bg);
     color: var(--text-primary); border-radius: 8px; padding: 8px 12px;
-    font-size: 13px; font-weight: 600; font-family: inherit; flex: 1;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    display: block; width: 100%; margin-bottom: 10px;
   }
   .action-btn:active { opacity: 0.7; }
   .action-btn:disabled { opacity: 0.5; }
+  #ai-next-transfers, #ai-chip-plan, #ai-squad-section { margin-bottom: 16px; }
   .ai-fpl-status { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; min-height: 16px; }
   .ai-gw-card {
     background: var(--surface-1); border: 1px solid var(--border);
@@ -635,6 +636,21 @@
     padding: 2px 6px; border-radius: 6px; background: var(--chip-bg); color: var(--text-secondary);
     white-space: nowrap;
   }
+  .ai-chip-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .ai-chip-row { padding: 8px 0; }
+  .ai-chip-row + .ai-chip-row { border-top: 1px solid var(--border); }
+  .ai-chip-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .ai-chip-name { font-size: 13px; font-weight: 600; }
+  .ai-chip-verdict {
+    flex-shrink: 0; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 6px; white-space: nowrap;
+  }
+  .ai-chip-verdict-play { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); }
+  .ai-chip-verdict-hold { background: var(--chip-bg); color: var(--text-secondary); }
+  .ai-chip-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
   .config-warning {
     background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
@@ -803,11 +819,16 @@
   </div>
 
   <section class="panel" data-tab="ai-fpl" hidden>
-    <div class="ai-fpl-actions">
-      <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
-      <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
-    </div>
     <div id="ai-fpl-status" class="ai-fpl-status"></div>
+
+    <button type="button" id="ai-transfers-btn" class="action-btn">Update Transfers</button>
+    <div id="ai-next-transfers"></div>
+
+    <button type="button" id="ai-confirm-btn" class="action-btn">Confirm Transfers</button>
+    <div id="ai-chip-plan"></div>
+
+    <div id="ai-squad-section"></div>
+
     <div id="ai-fpl-list" class="card-list"></div>
   </section>
 
@@ -877,7 +898,8 @@ let fplLastRows = [];
 let aiFplAccessUnlocked = false;
 
 const state = {
-  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] }, aiFplSquad: [],
+  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
+  aiFplChipPlan: { title: "", chips: [] }, aiFplSquad: [],
   fplSortKey: "xpts", fplSortDir: -1,
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
@@ -1242,6 +1264,38 @@ function parseAiFplTransfers(rows) {
     });
   }
   return { title, moves };
+}
+
+// The Chip plan table (AIXI!L1:O6) sits above the Transfer plan in the same
+// columns - "Chip"/"Best GW"/"Extra xPts"/"Recommendation" header, one row
+// per chip. Recommendation text is "VERDICT" or "VERDICT – detail" (e.g.
+// "HOLD – GW1 squad is built from scratch").
+function parseAiFplChipPlan(rows) {
+  let headerRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if ((rows[i][11] || "").trim() === "Chip" && (rows[i][12] || "").trim() === "Best GW") {
+      headerRow = i;
+      break;
+    }
+  }
+  if (headerRow < 0) return { title: "", chips: [] };
+
+  const title = ((rows[headerRow - 1] && rows[headerRow - 1][11]) || "").trim();
+  const chips = [];
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const name = (rows[i][11] || "").trim();
+    if (!name) break;
+    const recommendation = (rows[i][14] || "").trim();
+    const dashIdx = recommendation.indexOf(" – ");
+    chips.push({
+      name,
+      bestGw: (rows[i][12] || "").trim(),
+      extraXpts: (rows[i][13] || "").trim(),
+      verdict: dashIdx >= 0 ? recommendation.slice(0, dashIdx) : recommendation,
+      detail: dashIdx >= 0 ? recommendation.slice(dashIdx + 3) : "",
+    });
+  }
+  return { title, chips };
 }
 
 // The current-squad table (AIXI!A8:J23) sits in the same published rows too,
@@ -2506,19 +2560,49 @@ function renderAiTransferRow(m) {
   `;
 }
 
+function renderChipPlanRow(c) {
+  const metaParts = [];
+  if (c.bestGw) metaParts.push(`Best GW${c.bestGw}`);
+  if (c.extraXpts) metaParts.push(`+${c.extraXpts} xPts`);
+  if (c.detail) metaParts.push(c.detail);
+  return `
+    <div class="ai-chip-row">
+      <div class="ai-chip-top">
+        <span class="ai-chip-name">${escapeHtml(c.name)}</span>
+        <span class="ai-chip-verdict ai-chip-verdict-${c.verdict.toLowerCase()}">${escapeHtml(c.verdict)}</span>
+      </div>
+      ${metaParts.length ? `<div class="ai-chip-meta">${escapeHtml(metaParts.join(" · "))}</div>` : ""}
+    </div>
+  `;
+}
+
 function renderAiFpl() {
-  const container = document.getElementById("ai-fpl-list");
   const blocks = [...state.aiFpl].sort((a, b) => a.gw - b.gw);
   const transfers = state.aiFplTransfers || { title: "", moves: [] };
+  const chipPlan = state.aiFplChipPlan || { title: "", chips: [] };
   const squad = state.aiFplSquad || [];
 
-  const transfersHtml = `
+  // The AI's transfer plan starts the gameweek after the one that's
+  // already locked in (see computeCurrentGwBench) - so "next gameweek"
+  // is always state.currentGw + 1, e.g. GW3 while GW2 is current.
+  const nextGw = Number.isFinite(state.currentGw) ? state.currentGw + 1 : null;
+  const nextGwMoves = nextGw ? transfers.moves.filter((m) => m.gw === nextGw) : transfers.moves;
+
+  document.getElementById("ai-next-transfers").innerHTML = `
     <div class="ai-transfers-card">
-      <div class="ai-gw-header"><span>Transfers</span></div>
-      ${transfers.title ? `<div class="ai-transfers-title">${escapeHtml(transfers.title)}</div>` : ""}
-      ${transfers.moves.length
-        ? transfers.moves.map(renderAiTransferRow).join("")
+      <div class="ai-gw-header"><span>Transfers${nextGw ? ` &middot; GW${nextGw}` : ""}</span></div>
+      ${nextGwMoves.length
+        ? nextGwMoves.map(renderAiTransferRow).join("")
         : `<div class="ai-transfers-title">No transfers currently planned - hit Update Transfers to check.</div>`}
+    </div>
+  `;
+
+  document.getElementById("ai-chip-plan").innerHTML = `
+    <div class="ai-chip-card">
+      <div class="ai-gw-header"><span>${chipPlan.title ? escapeHtml(chipPlan.title) : "Chip plan"}</span></div>
+      ${chipPlan.chips.length
+        ? chipPlan.chips.map(renderChipPlanRow).join("")
+        : `<div class="ai-transfers-title">No chip plan data yet - hit Update Transfers to check.</div>`}
     </div>
   `;
 
@@ -2527,7 +2611,7 @@ function renderAiFpl() {
     .filter((p) => !squadBenchedNames.has(p.player))
     .reduce((sum, p) => sum + p.xpts, 0);
 
-  const squadHtml = `
+  document.getElementById("ai-squad-section").innerHTML = `
     <div class="ai-squad-card">
       <div class="ai-gw-header">
         <span>Current Squad${state.currentGw ? ` &middot; GW${state.currentGw}` : ""}</span>
@@ -2537,14 +2621,13 @@ function renderAiFpl() {
     </div>
   `;
 
-  const topRow = `<div class="ai-top-row">${squadHtml}${transfersHtml}</div>`;
-
+  const container = document.getElementById("ai-fpl-list");
   if (!blocks.length) {
-    container.innerHTML = topRow + `<div class="empty-state">No AI FPL squad data yet.</div>`;
+    container.innerHTML = `<div class="empty-state">No AI FPL squad data yet.</div>`;
     return;
   }
 
-  container.innerHTML = topRow + blocks.map((b) => `
+  container.innerHTML = blocks.map((b) => `
     <div class="ai-gw-card">
       <div class="ai-gw-header">
         <span>GW${b.gw}</span>
@@ -2680,6 +2763,7 @@ async function loadData() {
       .then((rows) => {
         state.aiFpl = parseAiFplBlocks(rows);
         state.aiFplTransfers = parseAiFplTransfers(rows);
+        state.aiFplChipPlan = parseAiFplChipPlan(rows);
         state.aiFplSquad = parseAiFplCurrentSquad(rows);
         renderAiFpl();
       })
