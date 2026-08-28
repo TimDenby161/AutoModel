@@ -2428,7 +2428,7 @@ function renderSquadPitchPlayer(p, isBenched, badge) {
     ? ` <span class="pitch-player-badge pitch-player-badge-${badge.toLowerCase()}">${badge}</span>`
     : "";
   return `
-    <div class="pitch-player ${isBenched ? "mins-red" : minsColorClass(p.mins)}">
+    <div class="pitch-player ${isBenched ? "mins-red" : "mins-green"}">
       <span class="pitch-player-pos">${escapeHtml(p.pos)}</span>
       <span class="pitch-player-name">${escapeHtml(p.player)}${badgeHtml}</span>
       <span class="pitch-player-price">&pound;${p.price.toFixed(1)}</span>
@@ -2479,9 +2479,8 @@ function computeCaptaincy(squad, benchedNames) {
   return { captain: starters[0]?.player || null, vice: starters[1]?.player || null };
 }
 
-function renderSquadPitch(squad) {
+function renderSquadPitch(squad, benchedNames) {
   if (!squad.length) return `<div class="empty-state">No current squad data yet.</div>`;
-  const benchedNames = computeCurrentGwBench(squad);
   const { captain, vice } = computeCaptaincy(squad, benchedNames);
   const body = SQUAD_PITCH_ORDER.map((pos) => {
     const players = squad.filter((p) => p.pos === pos);
@@ -2523,13 +2522,18 @@ function renderAiFpl() {
     </div>
   `;
 
+  const squadBenchedNames = computeCurrentGwBench(squad);
+  const startingXpts = squad
+    .filter((p) => !squadBenchedNames.has(p.player))
+    .reduce((sum, p) => sum + p.xpts, 0);
+
   const squadHtml = `
     <div class="ai-squad-card">
       <div class="ai-gw-header">
-        <span>Current Squad${state.currentGw ? ` &middot; GW${state.currentGw} bench in red` : ""}</span>
-        <span>${squad.length}</span>
+        <span>Current Squad${state.currentGw ? ` &middot; GW${state.currentGw}` : ""}</span>
+        <span>${startingXpts.toFixed(1)} pts</span>
       </div>
-      ${renderSquadPitch(squad)}
+      ${renderSquadPitch(squad, squadBenchedNames)}
     </div>
   `;
 
