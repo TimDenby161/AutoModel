@@ -162,8 +162,11 @@
   .match-card.acc-2 { background: color-mix(in srgb, var(--series-orange) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--series-orange) 50%, var(--border)); border-left: 4px solid var(--series-orange); }
   .match-card.acc-1 { background: color-mix(in srgb, var(--status-critical) 12%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-critical) 45%, var(--border)); border-left: 4px solid var(--status-critical); }
   .match-card.acc-0 { background: color-mix(in srgb, var(--status-critical) 24%, var(--surface-1)); border-color: var(--status-critical); border-left: 6px solid var(--status-critical); font-weight: 700; }
+  .match-card-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 4px;
+  }
   .accuracy-badge {
-    position: absolute; top: 7px; left: 7px;
     min-width: 30px; padding: 2px 6px; border-radius: 6px;
     font-size: 10px; line-height: 1.2; font-weight: 800;
     text-align: center; color: var(--text-primary);
@@ -2000,9 +2003,12 @@ function fixtureCardHtml(m) {
 function resultCardHtml(m) {
   const tier = scoreAccuracyTier(m);
   return `
-    <div class="match-card${tier ? ` ${tier.cls}` : ""}">
-      <div class="match-comp">
-        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+    <div class="match-card${tier ? ` ${tier.cls}` : ""}"${tier ? ` title="${escapeHtml(tier.label)}"` : ""}>
+      <div class="match-card-top">
+        ${tier ? `<div class="accuracy-badge" aria-label="${escapeHtml(tier.label)}">${tier.score}/5</div>` : "<span></span>"}
+        <div class="match-comp">
+          <span>${escapeHtml(formatKickoff(m.Date))}</span>
+        </div>
       </div>
       <div class="match-teams">
         <div class="match-team">
@@ -2210,9 +2216,11 @@ function renderResults() {
     const tier = scoreAccuracyTier(m);
     return `
     <div class="match-card${tier ? ` ${tier.cls}` : ""}"${tier ? ` title="${escapeHtml(tier.label)}"` : ""}>
-      ${tier ? `<div class="accuracy-badge" aria-label="${escapeHtml(tier.label)}">${tier.score}/5</div>` : ""}
-      <div class="match-comp">
-        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+      <div class="match-card-top">
+        ${tier ? `<div class="accuracy-badge" aria-label="${escapeHtml(tier.label)}">${tier.score}/5</div>` : "<span></span>"}
+        <div class="match-comp">
+          <span>${escapeHtml(formatKickoff(m.Date))}</span>
+        </div>
       </div>
       <div class="match-teams">
         <div class="match-team">
