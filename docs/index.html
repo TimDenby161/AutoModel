@@ -2292,7 +2292,9 @@ function predictionFactorMetrics(m) {
   const shapeScore = actualShape === projectedShape
     ? (actualResult === projectedResult
       ? (maxTeamScoreError <= 0.5 && gdError <= 0.5 ? 5 : Math.max(maxTeamScoreError <= 2.5 ? 4 : 3, 4))
-      : (maxTeamScoreError <= 1.5 ? 4 : maxTeamScoreError <= 3 ? 3 : 2))
+      : actualShape === "comfortable win" && projectedShape === "comfortable win"
+        ? 1
+        : (maxTeamScoreError <= 1.5 ? 4 : maxTeamScoreError <= 3 ? 3 : 2))
     : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
   const homeCsProb = Math.exp(-projA);
