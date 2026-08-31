@@ -154,11 +154,27 @@
   .match-card {
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 10px; padding: 10px 12px; cursor: pointer;
+    position: relative;
   }
-  .match-card.acc-green  { background: color-mix(in srgb, var(--status-good) 12%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-good) 45%, var(--border)); border-left: 4px solid var(--status-good); }
-  .match-card.acc-yellow { background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-warning) 45%, var(--border)); border-left: 4px solid var(--status-warning); }
-  .match-card.acc-orange { background: color-mix(in srgb, var(--series-orange) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--series-orange) 50%, var(--border)); border-left: 4px solid var(--series-orange); }
-  .match-card.acc-red    { background: color-mix(in srgb, var(--status-critical) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-critical) 50%, var(--border)); border-left: 4px solid var(--status-critical); }
+  .match-card.acc-5 { background: color-mix(in srgb, #f6c945 22%, var(--surface-1)); border-color: #d7a915; border-left: 5px solid #d7a915; box-shadow: 0 0 0 1px color-mix(in srgb, #f6c945 28%, transparent), 0 8px 22px color-mix(in srgb, #d7a915 20%, transparent); }
+  .match-card.acc-4 { background: color-mix(in srgb, var(--status-good) 13%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-good) 48%, var(--border)); border-left: 4px solid var(--status-good); }
+  .match-card.acc-3 { background: color-mix(in srgb, #dfff00 24%, var(--surface-1)); border-color: color-mix(in srgb, #dfff00 60%, var(--border)); border-left: 4px solid #dfff00; }
+  .match-card.acc-2 { background: color-mix(in srgb, var(--series-orange) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--series-orange) 50%, var(--border)); border-left: 4px solid var(--series-orange); }
+  .match-card.acc-1 { background: color-mix(in srgb, var(--status-critical) 12%, var(--surface-1)); border-color: color-mix(in srgb, var(--status-critical) 45%, var(--border)); border-left: 4px solid var(--status-critical); }
+  .match-card.acc-0 { background: color-mix(in srgb, var(--status-critical) 24%, var(--surface-1)); border-color: var(--status-critical); border-left: 6px solid var(--status-critical); font-weight: 700; }
+  .accuracy-badge {
+    position: absolute; top: 7px; left: 7px;
+    min-width: 30px; padding: 2px 6px; border-radius: 6px;
+    font-size: 10px; line-height: 1.2; font-weight: 800;
+    text-align: center; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    box-shadow: 0 1px 2px var(--border);
+  }
+  .acc-5 .accuracy-badge { background: #f6c945; border-color: #b98500; color: #161100; }
+  .acc-4 .accuracy-badge { background: var(--status-good); border-color: var(--status-good); color: #ffffff; }
+  .acc-3 .accuracy-badge { background: #dfff00; border-color: #a6bd00; color: #101400; }
+  .acc-2 .accuracy-badge { background: var(--series-orange); border-color: var(--series-orange); color: #ffffff; }
+  .acc-1 .accuracy-badge, .acc-0 .accuracy-badge { background: var(--status-critical); border-color: var(--status-critical); color: #ffffff; }
   .lineup-panel {
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
   }
@@ -2084,14 +2100,9 @@ function marginBucket(gd) {
   return Math.abs(gd) < 1 ? "narrow" : "clear";
 }
 
-// How good the frozen pre-kickoff projection (SnapProjH/SnapProjA) turned
-// out to be, judged the way a person would read it: did it call the right
-// winner first, THEN whether it read the game the same way (close vs
-// comfortable) - not raw goal-count error. A 2.4-0.2 projection for a game
-// that finished 5-1 is a very good projection (correctly called a
-// comfortable home win, and it was one) even though the exact numbers are
-// 3+ goals off; a projected home win for a game the away side won is a bad
-// projection even if the final margin was just 1 goal.
+// Scores the frozen pre-kickoff projection (SnapProjH/SnapProjA) on a 0-5
+// scale. Exact score proximity is rewarded first, then correct result and
+// margin shape, then progressively worse reads.
 function scoreAccuracyTier(m) {
   const actual = finalScore(m);
   const actualH = actual ? actual.home : NaN;
@@ -2112,34 +2123,34 @@ function scoreAccuracyTier(m) {
   // clear favorite once the draw probability is factored in (41/24/35).
   const projResult = hw >= draw && hw >= aw ? "H" : aw >= draw ? "A" : "D";
   const gdError = Math.abs(actualGD - projGD);
+  const scoreError = Math.abs(actualH - projH) + Math.abs(actualA - projA);
+  const maxTeamScoreError = Math.max(Math.abs(actualH - projH), Math.abs(actualA - projA));
   const gotWinnerRight = projResult === actualResult;
 
   const sameShape = marginBucket(actualGD) === marginBucket(projGD);
+  const projectedClearWrongWay = marginBucket(projGD) === "clear" && Math.sign(projGD) !== Math.sign(actualGD);
+
+  const tier = (score, label) => ({ score, cls: `acc-${score}`, label });
+
+  if (scoreError <= 0.75 && maxTeamScoreError <= 0.5) return tier(5, "5/5 Excellent");
+  if (scoreError <= 1.5 && maxTeamScoreError <= 1) return tier(4, "4/5 Very Good");
 
   if (gotWinnerRight) {
-    // Same "shape" of result (both close, or both a clear win) counts as
-    // very accurate regardless of the exact numbers - but cap it with a
-    // sanity ceiling so a wildly undersold blowout (e.g. proj by 1, actual
-    // by 8) still falls back to "Fairly Good" instead of "Very Accurate".
-    return sameShape && gdError <= 3
-      ? { cls: "acc-green", label: "Very Accurate" }
-      : { cls: "acc-yellow", label: "Fairly Good" };
+    if (sameShape && gdError <= 2) return tier(4, "4/5 Very Good");
+    if (gdError <= 3) return tier(3, "3/5 Decent");
+    return tier(2, "2/5 Loose");
   }
 
-  // The strict winner call (H/A/D via probability argmax) missed - but if
-  // the model read this as a close, could-go-either-way game (its top
-  // probability wasn't a confident favorite) and the actual result was
-  // also close (a draw or a 1-goal game), that's still a good read of the
-  // match even though the argmax nominally leaned to the "wrong" side.
-  // A confidently wrong call (e.g. predicted a clear win for one side, the
-  // other side won clearly) does NOT get this leniency.
+  // If the strict H/D/A call missed but both the projection and actual score
+  // were narrow, the match read was still useful.
   if (sameShape && marginBucket(actualGD) === "narrow") {
-    return { cls: "acc-yellow", label: "Fairly Good" };
+    return gdError <= 1.5 ? tier(3, "3/5 Decent") : tier(2, "2/5 Loose");
   }
 
-  return gdError <= 1.5
-    ? { cls: "acc-orange", label: "Not Good" }
-    : { cls: "acc-red", label: "Awful" };
+  if (projectedClearWrongWay && gdError > 3) return tier(0, "0/5 Miles Off");
+  if (gdError <= 1.5) return tier(2, "2/5 Loose");
+  if (gdError <= 3) return tier(1, "1/5 Poor");
+  return tier(0, "0/5 Miles Off");
 }
 
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
@@ -2171,6 +2182,53 @@ function finalScoreCenter(m) {
       ${awayWonPens ? pensTag : ""}
     </div>
   `;
+}
+
+function renderResults() {
+  const container = document.getElementById("results-list");
+  const leagueIds = competitionIdsFor(state.resultFilter);
+  const dateFilter = parseLocalDateInput(state.resultDateFilter);
+  const roundFilter = state.resultRoundFilter;
+  const matching = state.fixtures
+    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date)
+    .filter((m) => !leagueIds || leagueIds.includes(String(m.ID)))
+    .filter((m) => !dateFilter || isSameLocalDay(m.Date, dateFilter))
+    .filter((m) => !roundFilter || String(m.Round || "").trim() === roundFilter)
+    .sort((a, b) => new Date(b.Date) - new Date(a.Date));
+
+  // A specific date or round is a deliberately narrow query - show
+  // everything that matches instead of capping to the default rolling count.
+  const recent = (dateFilter || roundFilter) ? matching : matching.slice(0, CONFIG.resultsCount);
+
+  if (!recent.length) {
+    container.innerHTML = `<div class="empty-state">No recent results found.</div>`;
+    return;
+  }
+
+  const groups = groupByCompetition(recent);
+  container.innerHTML = renderGroupedMatches(groups, state.collapsedResultGroups, (m) => {
+    const tier = scoreAccuracyTier(m);
+    return `
+    <div class="match-card${tier ? ` ${tier.cls}` : ""}"${tier ? ` title="${escapeHtml(tier.label)}"` : ""}>
+      ${tier ? `<div class="accuracy-badge" aria-label="${escapeHtml(tier.label)}">${tier.score}/5</div>` : ""}
+      <div class="match-comp">
+        <span>${escapeHtml(formatKickoff(m.Date))}</span>
+      </div>
+      <div class="match-teams">
+        <div class="match-team">
+          ${escapeHtml(m.Home)}
+          ${clubScoreLabel(m.SnapHomeScr)}
+        </div>
+        ${finalScoreCenter(m)}
+        <div class="match-team away">
+          ${escapeHtml(m.Away)}
+          ${clubScoreLabel(m.SnapAwayScr)}
+        </div>
+      </div>
+      ${matchProbsRowSnapshot(m)}
+    </div>
+  `;
+  });
 }
 
 // Pos (broad G/D/M/F) drives which column P shows: defenders get xDD
