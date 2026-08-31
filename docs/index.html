@@ -2226,104 +2226,74 @@ function metricScoreByError(error, excellent, good, decent, loose, poor) {
   return 0;
 }
 
-// Scores the frozen pre-kickoff projection (SnapProjH/SnapProjA) on a 0-5
-// scale. Exact score proximity is rewarded first, then correct result and
-// margin shape, then progressively worse reads.
-function scoreAccuracyTier(m) {
+function predictionFactorMetrics(m) {
   const actual = finalScore(m);
   const actualH = actual ? actual.home : NaN;
   const actualA = actual ? actual.away : NaN;
   const projH = parseFloat(m.SnapProjH);
   const projA = parseFloat(m.SnapProjA);
-  const hw = parseFloat(m.SnapHomeWinPct);
-  const draw = parseFloat(m.SnapDrawPct);
-  const aw = parseFloat(m.SnapAwayWinPct);
   if (![actualH, actualA, projH, projA].every(Number.isFinite)) return null;
 
   const actualGD = actualH - actualA;
   const projGD = projH - projA;
-  const actualResult = actualGD > 0 ? "H" : actualGD < 0 ? "A" : "D";
-  // The model's own most-likely outcome (highest of its win/draw/away
-  // probabilities), not a threshold on the projected score's goal
-  // difference - a near-even scoreline (e.g. 1.6-1.4) can still imply a
-  // clear favorite once the draw probability is factored in (41/24/35).
-  const hasProbabilities = [hw, draw, aw].every(Number.isFinite);
-  const projResult = hasProbabilities
-    ? (hw >= draw && hw >= aw ? "H" : aw >= draw ? "A" : "D")
-    : (projGD > 0 ? "H" : projGD < 0 ? "A" : "D");
-  const gdError = Math.abs(actualGD - projGD);
-  const scoreError = Math.abs(actualH - projH) + Math.abs(actualA - projA);
-  const maxTeamScoreError = Math.max(Math.abs(actualH - projH), Math.abs(actualA - projA));
-  const gotWinnerRight = projResult === actualResult;
-
-  const sameShape = marginBucket(actualGD) === marginBucket(projGD);
-  const projectedClearWrongWay = marginBucket(projGD) === "clear" && Math.sign(projGD) !== Math.sign(actualGD);
-
-  const tier = (score, label) => ({ score, cls: `acc-${score}`, label });
   const likelyScore = mostLikelyScore(projH, projA);
+  const likelyGD = likelyScore.home - likelyScore.away;
 
-  if (likelyScore.home === actualH && likelyScore.away === actualA) return tier(5, "5/5 Exact Read");
-  if (scoreError <= 0.75 && maxTeamScoreError <= 0.5) return tier(5, "5/5 Excellent");
-  if (scoreError <= 1.5 && maxTeamScoreError <= 1) return tier(4, "4/5 Very Good");
-
-  if (gotWinnerRight) {
-    if (sameShape && gdError <= 2) return tier(4, "4/5 Very Good");
-    if (gdError <= 3) return tier(3, "3/5 Decent");
-    return tier(2, "2/5 Loose");
-  }
-
-  // If the strict H/D/A call missed but both the projection and actual score
-  // were narrow, the match read was still useful.
-  if (sameShape && marginBucket(actualGD) === "narrow") {
-    return gdError <= 1.5 ? tier(3, "3/5 Decent") : tier(2, "2/5 Loose");
-  }
-
-  if (projectedClearWrongWay && gdError > 3) return tier(0, "0/5 Miles Off");
-  if (gdError <= 1.5) return tier(2, "2/5 Loose");
-  if (gdError <= 3) return tier(1, "1/5 Poor");
-  return tier(0, "0/5 Miles Off");
-}
-
-function predictionMetricBreakdown(m) {
-  const actual = finalScore(m);
-  const projH = parseFloat(m.SnapProjH);
-  const projA = parseFloat(m.SnapProjA);
-  const overall = scoreAccuracyTier(m);
-  if (!actual || !Number.isFinite(projH) || !Number.isFinite(projA) || !overall) return [];
-
-  const actualTotal = actual.home + actual.away;
+  const actualTotal = actualH + actualA;
   const projectedTotal = projH + projA;
   const totalError = Math.abs(actualTotal - projectedTotal);
   const goalsScore = metricScoreByError(totalError, 0.5, 1, 1.5, 2.5, 3.5);
 
-  const actualGD = actual.home - actual.away;
-  const projectedGD = projH - projA;
-  const gdError = Math.abs(actualGD - projectedGD);
   const actualResult = resultLabel(actualGD);
-  const projectedResult = resultLabel(projectedGD);
-  const winnerScore = actualResult === projectedResult ? 5 : (Math.abs(actualGD) <= 1 && Math.abs(projectedGD) < 1 ? 3 : 1);
+  const projectedResult = resultLabel(likelyGD);
+  const winnerScore = actualResult === projectedResult ? 5 : (Math.abs(actualGD) <= 1 && Math.abs(likelyGD) <= 1 ? 3 : 1);
+
+  const gdError = Math.abs(actualGD - projGD);
   const marginScore = metricScoreByError(gdError, 0.5, 1, 1.5, 2.5, 3.5);
 
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
-  const projectedShape = marginBucket(projectedGD) === "narrow" ? "close game" : "comfortable win";
+  const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
   const shapeScore = actualShape === projectedShape ? 5 : (gdError <= 1.5 ? 3 : 1);
 
   const homeCsProb = Math.exp(-projA);
   const awayCsProb = Math.exp(-projH);
   const homeCsExpected = homeCsProb >= 0.5;
   const awayCsExpected = awayCsProb >= 0.5;
-  const homeCsActual = actual.away === 0;
-  const awayCsActual = actual.home === 0;
+  const homeCsActual = actualA === 0;
+  const awayCsActual = actualH === 0;
   const cleanSheetHits = Number(homeCsExpected === homeCsActual) + Number(awayCsExpected === awayCsActual);
   const cleanSheetScore = cleanSheetHits === 2 ? 5 : cleanSheetHits === 1 ? 3 : 0;
 
   return [
-    metricTier(overall.score, "Overall", overall.label.replace(/^\d\/5\s*/, "")),
     metricTier(goalsScore, "Goals", `${projectedTotal.toFixed(1)} predicted, ${actualTotal} actual (${totalError.toFixed(1)} off)`),
     metricTier(winnerScore, "Winner", `${projectedResult} projected, ${actualResult} actual`),
-    metricTier(marginScore, "Margin", `${projectedGD.toFixed(1)} projected GD, ${actualGD} actual GD`),
+    metricTier(marginScore, "Margin", `${projGD.toFixed(1)} projected GD, ${actualGD} actual GD`),
     metricTier(shapeScore, "Shape", `${projectedShape} projected, ${actualShape} actual`),
     metricTier(cleanSheetScore, "Clean Sheets", `${cleanSheetHits}/2 calls right; CS chances ${Math.round(homeCsProb * 100)}% home, ${Math.round(awayCsProb * 100)}% away`),
+  ];
+}
+
+function overallLabel(score) {
+  return ["Miles Off", "Poor", "Loose", "Decent", "Very Good", "Excellent"][score] || "Rated";
+}
+
+// Overall is the rounded average of the five component ratings below.
+function scoreAccuracyTier(m) {
+  const metrics = predictionFactorMetrics(m);
+  if (!metrics || !metrics.length) return null;
+  const average = metrics.reduce((sum, metric) => sum + metric.score, 0) / metrics.length;
+  const score = Math.max(0, Math.min(5, Math.round(average)));
+  return { score, cls: `acc-${score}`, label: `${score}/5 ${overallLabel(score)}`, average };
+}
+
+function predictionMetricBreakdown(m) {
+  const metrics = predictionFactorMetrics(m);
+  const overall = scoreAccuracyTier(m);
+  if (!metrics || !overall) return [];
+
+  return [
+    metricTier(overall.score, "Overall", `${overall.label.replace(/^\d\/5\s*/, "")} (${overall.average.toFixed(1)} factor avg)`),
+    ...metrics,
   ];
 }
 
