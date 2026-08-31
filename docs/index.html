@@ -2264,7 +2264,11 @@ function predictionFactorMetrics(m) {
 
   const actualResult = resultLabel(actualGD);
   const projectedResult = resultLabel(likelyGD);
-  const winnerScore = actualResult === projectedResult ? 5 : (Math.abs(actualGD) <= 1 && Math.abs(likelyGD) <= 1 ? 3 : 1);
+  const winnerScore = actualResult === projectedResult
+    ? 5
+    : (actualResult === "draw" || projectedResult === "draw") && Math.abs(actualGD) <= 1 && Math.abs(likelyGD) <= 1
+      ? 2
+      : 1;
 
   const gdError = Math.abs(actualGD - projGD);
   const marginScore = metricScoreByError(gdError, 0.5, 1, 1.5, 2.5, 3.5);
