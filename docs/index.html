@@ -2275,7 +2275,7 @@ function predictionFactorMetrics(m) {
 
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
   const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
-  const shapeScore = actualShape === projectedShape ? 5 : (gdError <= 1.5 ? 3 : 1);
+  const shapeScore = actualShape === projectedShape ? 5 : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
   const homeCsProb = Math.exp(-projA);
   const awayCsProb = Math.exp(-projH);
@@ -2284,14 +2284,23 @@ function predictionFactorMetrics(m) {
   const homeCsActual = actualA === 0;
   const awayCsActual = actualH === 0;
   const cleanSheetHits = Number(homeCsExpected === homeCsActual) + Number(awayCsExpected === awayCsActual);
-  const cleanSheetScore = cleanSheetHits === 2 ? 5 : cleanSheetHits === 1 ? 3 : 0;
+  const homeCsOutcomeProb = homeCsActual ? homeCsProb : 1 - homeCsProb;
+  const awayCsOutcomeProb = awayCsActual ? awayCsProb : 1 - awayCsProb;
+  const cleanSheetConfidence = (homeCsOutcomeProb + awayCsOutcomeProb) / 2;
+  const cleanSheetScore = cleanSheetHits < 2
+    ? (cleanSheetHits === 1 ? 2 : 0)
+    : cleanSheetConfidence >= 0.85 ? 5
+    : cleanSheetConfidence >= 0.75 ? 4
+    : cleanSheetConfidence >= 0.6 ? 3
+    : cleanSheetConfidence >= 0.5 ? 2
+    : 1;
 
   return [
     metricTier(goalsScore, "Goals", `${projectedTotal.toFixed(1)} predicted, ${actualTotal} actual; ${goalBand(projectedTotal)} vs ${goalBand(actualTotal)} (${totalError.toFixed(1)} off)`),
     metricTier(winnerScore, "Winner", `${projectedResult} projected, ${actualResult} actual`),
     metricTier(marginScore, "Margin", `${projGD.toFixed(1)} projected GD, ${actualGD} actual GD`),
     metricTier(shapeScore, "Shape", `${projectedShape} projected, ${actualShape} actual`),
-    metricTier(cleanSheetScore, "Clean Sheets", `${cleanSheetHits}/2 calls right; CS chances ${Math.round(homeCsProb * 100)}% home, ${Math.round(awayCsProb * 100)}% away`),
+    metricTier(cleanSheetScore, "Clean Sheets", `${cleanSheetHits}/2 calls right; CS chances ${Math.round(homeCsProb * 100)}% home, ${Math.round(awayCsProb * 100)}% away; ${Math.round(cleanSheetConfidence * 100)}% outcome confidence`),
   ];
 }
 
