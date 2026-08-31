@@ -2217,6 +2217,10 @@ function resultLabel(gd) {
   return gd > 0 ? "home win" : gd < 0 ? "away win" : "draw";
 }
 
+function projectedResultLabel(gd) {
+  return Math.abs(gd) <= 0.25 ? "draw" : resultLabel(gd);
+}
+
 function metricScoreByError(error, excellent, good, decent, loose, poor) {
   if (error <= excellent) return 5;
   if (error <= good) return 4;
@@ -2253,8 +2257,6 @@ function predictionFactorMetrics(m) {
 
   const actualGD = actualH - actualA;
   const projGD = projH - projA;
-  const likelyScore = mostLikelyScore(projH, projA);
-  const likelyGD = likelyScore.home - likelyScore.away;
 
   const actualTotal = actualH + actualA;
   const projectedTotal = projH + projA;
@@ -2263,10 +2265,10 @@ function predictionFactorMetrics(m) {
   const goalsScore = Math.max(exactGoalsScore, goalBandScore(projectedTotal, actualTotal));
 
   const actualResult = resultLabel(actualGD);
-  const projectedResult = resultLabel(likelyGD);
+  const projectedResult = projectedResultLabel(projGD);
   const winnerScore = actualResult === projectedResult
     ? 5
-    : (actualResult === "draw" || projectedResult === "draw") && Math.abs(actualGD) <= 1 && Math.abs(likelyGD) <= 1
+    : (actualResult === "draw" || projectedResult === "draw") && Math.abs(actualGD) <= 1 && Math.abs(projGD) <= 0.25
       ? 2
       : 1;
 
@@ -2279,23 +2281,27 @@ function predictionFactorMetrics(m) {
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
   const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
   const shapeScore = actualShape === projectedShape
-    ? (Math.sign(actualGD) === Math.sign(projGD)
-      ? (maxTeamScoreError <= 1.5 ? 5 : maxTeamScoreError <= 2.5 ? 4 : 3)
+    ? (actualResult === projectedResult
+      ? (maxTeamScoreError <= 0.5 && gdError <= 0.5 ? 5 : maxTeamScoreError <= 2.5 ? 4 : 3)
       : (maxTeamScoreError <= 1.5 ? 4 : maxTeamScoreError <= 3 ? 3 : 2))
     : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
   const homeCsProb = Math.exp(-projA);
   const awayCsProb = Math.exp(-projH);
-  const homeCsExpected = homeCsProb >= 0.5;
-  const awayCsExpected = awayCsProb >= 0.5;
+  const cleanSheetCallThreshold = 0.4;
+  const homeCsExpected = homeCsProb >= cleanSheetCallThreshold;
+  const awayCsExpected = awayCsProb >= cleanSheetCallThreshold;
   const homeCsActual = actualA === 0;
   const awayCsActual = actualH === 0;
   const cleanSheetHits = Number(homeCsExpected === homeCsActual) + Number(awayCsExpected === awayCsActual);
+  const predictedAnyCleanSheet = homeCsExpected || awayCsExpected;
+  const actualAnyCleanSheet = homeCsActual || awayCsActual;
   const homeCsOutcomeProb = homeCsActual ? homeCsProb : 1 - homeCsProb;
   const awayCsOutcomeProb = awayCsActual ? awayCsProb : 1 - awayCsProb;
   const cleanSheetConfidence = (homeCsOutcomeProb + awayCsOutcomeProb) / 2;
   const cleanSheetScoreRaw = cleanSheetHits < 2
     ? (cleanSheetHits === 1 ? 2 : 0)
+    : predictedAnyCleanSheet === actualAnyCleanSheet && actualAnyCleanSheet ? 5
     : cleanSheetConfidence >= 0.85 ? 5
     : cleanSheetConfidence >= 0.7 ? 4
     : cleanSheetConfidence >= 0.55 ? 3
