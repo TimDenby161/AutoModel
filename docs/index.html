@@ -2273,6 +2273,8 @@ function predictionFactorMetrics(m) {
   const projectedResult = projectedResultLabel(projGD);
   const winnerScore = actualResult === projectedResult
     ? 5
+    : actualResult === "draw" && Math.abs(projGD) <= 0.6
+      ? 3
     : (actualResult === "draw" || projectedResult === "draw") && Math.abs(actualGD) <= 1 && Math.abs(projGD) <= 0.25
       ? 2
       : actualResult !== "draw" && projectedResult !== "draw"
