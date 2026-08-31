@@ -677,7 +677,7 @@
     gap: 8px; margin-bottom: 10px;
   }
   .stats-count-grid {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex; flex-direction: column;
     gap: 8px;
   }
   .stats-card {
@@ -691,6 +691,15 @@
   .stats-value {
     margin-top: 4px; font-size: 24px; line-height: 1; font-weight: 800;
     font-variant-numeric: tabular-nums;
+  }
+  .stats-count-card {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+  }
+  .stats-count-main { min-width: 0; }
+  .stats-percent {
+    font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
   }
   .stats-note { color: var(--text-muted); font-size: 11px; margin: 0 0 10px; }
   .stats-card.acc-5 { border-color: #d7a915; background: color-mix(in srgb, #f6c945 22%, var(--surface-1)); box-shadow: 0 0 0 1px color-mix(in srgb, #f6c945 24%, transparent); }
@@ -2286,9 +2295,12 @@ function renderStats() {
 
   note.textContent = "Only finished matches with a snapshot projected score are included.";
   counts.innerHTML = [5, 4, 3, 2, 1, 0].map((score) => `
-    <div class="stats-card acc-${score}">
-      <div class="stats-label">${score}/5 Predictions</div>
-      <div class="stats-value">${countByScore[score].toLocaleString()}</div>
+    <div class="stats-card stats-count-card acc-${score}">
+      <div class="stats-count-main">
+        <div class="stats-label">${score}/5 Predictions</div>
+        <div class="stats-value">${countByScore[score].toLocaleString()}</div>
+      </div>
+      <div class="stats-percent">${total ? ((countByScore[score] / total) * 100).toFixed(1) : "0.0"}%</div>
     </div>
   `).join("");
 }
