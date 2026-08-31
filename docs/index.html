@@ -2272,11 +2272,16 @@ function predictionFactorMetrics(m) {
 
   const gdError = Math.abs(actualGD - projGD);
   const marginScore = metricScoreByError(gdError, 0.5, 1, 1.5, 2.5, 3.5);
+  const homeScoreError = Math.abs(actualH - projH);
+  const awayScoreError = Math.abs(actualA - projA);
+  const maxTeamScoreError = Math.max(homeScoreError, awayScoreError);
 
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
   const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
   const shapeScore = actualShape === projectedShape
-    ? (Math.sign(actualGD) === Math.sign(projGD) ? 5 : 4)
+    ? (Math.sign(actualGD) === Math.sign(projGD)
+      ? (maxTeamScoreError <= 1.5 ? 5 : maxTeamScoreError <= 2.5 ? 4 : 3)
+      : (maxTeamScoreError <= 1.5 ? 4 : maxTeamScoreError <= 3 ? 3 : 2))
     : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
   const homeCsProb = Math.exp(-projA);
@@ -2303,7 +2308,7 @@ function predictionFactorMetrics(m) {
     metricTier(goalsScore, "Goals", `${projectedTotal.toFixed(1)} predicted, ${actualTotal} actual; ${goalBand(projectedTotal)} vs ${goalBand(actualTotal)} (${totalError.toFixed(1)} off)`),
     metricTier(winnerScore, "Winner", `${projectedResult} projected, ${actualResult} actual`),
     metricTier(marginScore, "Margin", `${projGD.toFixed(1)} projected GD, ${actualGD} actual GD`),
-    metricTier(shapeScore, "Shape", `${projectedShape} projected, ${actualShape} actual`),
+    metricTier(shapeScore, "Shape", `${projectedShape} projected, ${actualShape} actual; score misses ${homeScoreError.toFixed(1)} home, ${awayScoreError.toFixed(1)} away`),
     metricTier(cleanSheetScore, "Clean Sheets", `${cleanSheetHits}/2 calls right; CS chances ${Math.round(homeCsProb * 100)}% home, ${Math.round(awayCsProb * 100)}% away; ${Math.round(cleanSheetConfidence * 100)}% outcome confidence`),
   ];
 }
