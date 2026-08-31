@@ -671,6 +671,35 @@
   .ai-chip-verdict-hold { background: var(--chip-bg); color: var(--text-secondary); }
   .ai-chip-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
+  .stats-filters { margin-bottom: 10px; }
+  .stats-summary-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px; margin-bottom: 10px;
+  }
+  .stats-count-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .stats-card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .stats-label {
+    color: var(--text-muted); font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .stats-value {
+    margin-top: 4px; font-size: 24px; line-height: 1; font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats-note { color: var(--text-muted); font-size: 11px; margin: 0 0 10px; }
+  .stats-card.acc-5 { border-color: #d7a915; background: color-mix(in srgb, #f6c945 22%, var(--surface-1)); box-shadow: 0 0 0 1px color-mix(in srgb, #f6c945 24%, transparent); }
+  .stats-card.acc-4 { border-color: color-mix(in srgb, var(--status-good) 48%, var(--border)); background: color-mix(in srgb, var(--status-good) 13%, var(--surface-1)); }
+  .stats-card.acc-3 { border-color: color-mix(in srgb, #dfff00 60%, var(--border)); background: color-mix(in srgb, #dfff00 24%, var(--surface-1)); }
+  .stats-card.acc-2 { border-color: color-mix(in srgb, var(--series-orange) 50%, var(--border)); background: color-mix(in srgb, var(--series-orange) 14%, var(--surface-1)); }
+  .stats-card.acc-1 { border-color: color-mix(in srgb, var(--status-critical) 45%, var(--border)); background: color-mix(in srgb, var(--status-critical) 12%, var(--surface-1)); }
+  .stats-card.acc-0 { border-color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 24%, var(--surface-1)); }
+
   .config-warning {
     background: var(--chip-bg); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
@@ -696,6 +725,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="fixtures" aria-selected="true">Matches</button>
     <button role="tab" data-tab="table" aria-selected="false">Table</button>
+    <button role="tab" data-tab="stats" aria-selected="false">Stats</button>
     <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
     <button role="tab" data-tab="ai-fpl" aria-selected="false">AI FPL</button>
   </nav>
@@ -764,6 +794,18 @@
         <tbody id="table-body"></tbody>
       </table>
     </div>
+  </section>
+
+  <section class="panel" data-tab="stats">
+    <div class="filter-row stats-filters" id="stats-range-filters">
+      <button type="button" class="filter-chip" data-range="all" aria-pressed="true">All Time</button>
+      <button type="button" class="filter-chip" data-range="week" aria-pressed="false">Last Week</button>
+      <button type="button" class="filter-chip" data-range="month" aria-pressed="false">Last Month</button>
+      <button type="button" class="filter-chip" data-range="six-months" aria-pressed="false">Last 6 Months</button>
+    </div>
+    <div id="stats-summary" class="stats-summary-grid"></div>
+    <p id="stats-note" class="stats-note"></p>
+    <div id="stats-counts" class="stats-count-grid"></div>
   </section>
 
   <section class="panel" data-tab="fpl">
@@ -913,7 +955,7 @@ const state = {
   fplPosFilter: new Set(["G", "D", "M", "F"]), fplClubFilter: "",
   fplPriceMin: 4, fplPriceMax: 15.5,
   currentGw: null,
-  fixtureFilter: "all", tableFilter: "pl", tableView: "current",
+  fixtureFilter: "all", tableFilter: "pl", tableView: "current", statsRange: "all",
   // Competition names the user has collapsed on the Matches tab - persists
   // across re-renders (filter changes, refresh) since it lives in state, not
   // just the DOM.
@@ -2137,7 +2179,7 @@ function scoreAccuracyTier(m) {
   const hw = parseFloat(m.SnapHomeWinPct);
   const draw = parseFloat(m.SnapDrawPct);
   const aw = parseFloat(m.SnapAwayWinPct);
-  if (![actualH, actualA, projH, projA, hw, draw, aw].every(Number.isFinite)) return null;
+  if (![actualH, actualA, projH, projA].every(Number.isFinite)) return null;
 
   const actualGD = actualH - actualA;
   const projGD = projH - projA;
@@ -2146,7 +2188,10 @@ function scoreAccuracyTier(m) {
   // probabilities), not a threshold on the projected score's goal
   // difference - a near-even scoreline (e.g. 1.6-1.4) can still imply a
   // clear favorite once the draw probability is factored in (41/24/35).
-  const projResult = hw >= draw && hw >= aw ? "H" : aw >= draw ? "A" : "D";
+  const hasProbabilities = [hw, draw, aw].every(Number.isFinite);
+  const projResult = hasProbabilities
+    ? (hw >= draw && hw >= aw ? "H" : aw >= draw ? "A" : "D")
+    : (projGD > 0 ? "H" : projGD < 0 ? "A" : "D");
   const gdError = Math.abs(actualGD - projGD);
   const scoreError = Math.abs(actualH - projH) + Math.abs(actualA - projA);
   const maxTeamScoreError = Math.max(Math.abs(actualH - projH), Math.abs(actualA - projA));
@@ -2178,6 +2223,74 @@ function scoreAccuracyTier(m) {
   if (gdError <= 1.5) return tier(2, "2/5 Loose");
   if (gdError <= 3) return tier(1, "1/5 Poor");
   return tier(0, "0/5 Miles Off");
+}
+
+const STATS_RANGES = {
+  all: { label: "All Time", days: null },
+  week: { label: "Last Week", days: 7 },
+  month: { label: "Last Month", days: 30 },
+  "six-months": { label: "Last 6 Months", days: 183 },
+};
+
+function statsCutoffDate(rangeKey) {
+  const range = STATS_RANGES[rangeKey] || STATS_RANGES.all;
+  if (!range.days) return null;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - range.days);
+  return cutoff;
+}
+
+function predictionStatsRows() {
+  const cutoff = statsCutoffDate(state.statsRange);
+  return state.fixtures
+    .filter((m) => toNum(m.Finished) === 1 && toNum(m.Cancelled) === 0 && m.Date)
+    .filter((m) => !cutoff || new Date(m.Date) >= cutoff)
+    .map((m) => {
+      const actual = finalScore(m);
+      const projH = parseFloat(m.SnapProjH);
+      const projA = parseFloat(m.SnapProjA);
+      const tier = scoreAccuracyTier(m);
+      if (!actual || !Number.isFinite(projH) || !Number.isFinite(projA) || !tier) return null;
+      return {
+        score: tier.score,
+        predictedGoals: projH + projA,
+        actualGoals: actual.home + actual.away,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderStats() {
+  const summary = document.getElementById("stats-summary");
+  const counts = document.getElementById("stats-counts");
+  const note = document.getElementById("stats-note");
+  if (!summary || !counts || !note) return;
+
+  const rows = predictionStatsRows();
+  const total = rows.length;
+  const countByScore = [0, 0, 0, 0, 0, 0];
+  rows.forEach((row) => countByScore[row.score] += 1);
+  const avg = (key) => total ? rows.reduce((sum, row) => sum + row[key], 0) / total : 0;
+
+  summary.innerHTML = [
+    ["Rated Matches", total.toLocaleString()],
+    ["Avg Pred Goals", avg("predictedGoals").toFixed(2)],
+    ["Avg Actual Goals", avg("actualGoals").toFixed(2)],
+    ["Avg Rating", total ? (rows.reduce((sum, row) => sum + row.score, 0) / total).toFixed(2) : "0.00"],
+  ].map(([label, value]) => `
+    <div class="stats-card">
+      <div class="stats-label">${label}</div>
+      <div class="stats-value">${value}</div>
+    </div>
+  `).join("");
+
+  note.textContent = "Only finished matches with a snapshot projected score are included.";
+  counts.innerHTML = [5, 4, 3, 2, 1, 0].map((score) => `
+    <div class="stats-card acc-${score}">
+      <div class="stats-label">${score}/5 Predictions</div>
+      <div class="stats-value">${countByScore[score].toLocaleString()}</div>
+    </div>
+  `).join("");
 }
 
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
@@ -2949,6 +3062,7 @@ async function loadData() {
         }
         populateRoundFilter("fixture");
         renderMatches();
+        renderStats();
       })
       .catch((err) => {
         console.error(err);
@@ -3102,6 +3216,15 @@ document.querySelectorAll("#table-view-toggle .filter-chip[data-view]").forEach(
     btn.setAttribute("aria-pressed", "true");
     state.tableView = btn.dataset.view;
     renderTable();
+  });
+});
+
+document.querySelectorAll("#stats-range-filters .filter-chip[data-range]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#stats-range-filters .filter-chip[data-range]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.statsRange = btn.dataset.range;
+    renderStats();
   });
 });
 
