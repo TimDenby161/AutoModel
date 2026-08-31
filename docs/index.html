@@ -2277,16 +2277,18 @@ function predictionFactorMetrics(m) {
       : 1;
 
   const gdError = Math.abs(actualGD - projGD);
-  const marginScore = metricScoreByError(gdError, 0.5, 1, 1.5, 2.5, 3.5);
   const homeScoreError = Math.abs(actualH - projH);
   const awayScoreError = Math.abs(actualA - projA);
   const maxTeamScoreError = Math.max(homeScoreError, awayScoreError);
 
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
   const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
+  const gotWinnerAndShape = actualResult === projectedResult && actualShape === projectedShape;
+  const marginBaseScore = metricScoreByError(gdError, 0.5, 1, 1.5, 2.5, 3.5);
+  const marginScore = gotWinnerAndShape ? Math.max(marginBaseScore, 3) : marginBaseScore;
   const shapeScore = actualShape === projectedShape
     ? (actualResult === projectedResult
-      ? (maxTeamScoreError <= 0.5 && gdError <= 0.5 ? 5 : maxTeamScoreError <= 2.5 ? 4 : 3)
+      ? (maxTeamScoreError <= 0.5 && gdError <= 0.5 ? 5 : Math.max(maxTeamScoreError <= 2.5 ? 4 : 3, 4))
       : (maxTeamScoreError <= 1.5 ? 4 : maxTeamScoreError <= 3 ? 3 : 2))
     : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
