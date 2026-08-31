@@ -2183,7 +2183,7 @@ function decidedOnPenalties(m) {
 // more reads as "clear win" - deliberately coarse, since the point is
 // telling a nail-biter from a comfortable win, not measuring exact margins.
 function marginBucket(gd) {
-  return Math.abs(gd) < 1 ? "narrow" : "clear";
+  return Math.abs(gd) <= 1 ? "narrow" : "clear";
 }
 
 function poissonProbability(k, lambda) {
@@ -2290,8 +2290,8 @@ function predictionFactorMetrics(m) {
   const cleanSheetScoreRaw = cleanSheetHits < 2
     ? (cleanSheetHits === 1 ? 2 : 0)
     : cleanSheetConfidence >= 0.85 ? 5
-    : cleanSheetConfidence >= 0.75 ? 4
-    : cleanSheetConfidence >= 0.6 ? 3
+    : cleanSheetConfidence >= 0.7 ? 4
+    : cleanSheetConfidence >= 0.55 ? 3
     : cleanSheetConfidence >= 0.5 ? 2
     : 1;
   const maxGoalsConceded = Math.max(actualH, actualA);
