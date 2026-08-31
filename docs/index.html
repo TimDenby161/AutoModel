@@ -2275,7 +2275,9 @@ function predictionFactorMetrics(m) {
 
   const actualShape = marginBucket(actualGD) === "narrow" ? "close game" : "comfortable win";
   const projectedShape = marginBucket(projGD) === "narrow" ? "close game" : "comfortable win";
-  const shapeScore = actualShape === projectedShape ? 5 : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
+  const shapeScore = actualShape === projectedShape
+    ? (Math.sign(actualGD) === Math.sign(projGD) ? 5 : 4)
+    : (gdError <= 1.5 ? 3 : gdError <= 2.5 ? 2 : 1);
 
   const homeCsProb = Math.exp(-projA);
   const awayCsProb = Math.exp(-projH);
