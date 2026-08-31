@@ -2336,13 +2336,24 @@ function overallLabel(score) {
   return ["Miles Off", "Poor", "Loose", "Decent", "Very Good", "Excellent"][score] || "Rated";
 }
 
-// Overall is the rounded average of the five component ratings below.
+const PREDICTION_METRIC_WEIGHTS = {
+  Winner: 0.3,
+  Shape: 0.15,
+  Goals: 0.1,
+  Margin: 0.25,
+  "Clean Sheets": 0.2,
+};
+
+// Overall is a weighted score: Winner 30%, Margin 25%, Clean Sheets 20%,
+// Shape 15%, Goals 10%.
 function scoreAccuracyTier(m) {
   const metrics = predictionFactorMetrics(m);
   if (!metrics || !metrics.length) return null;
-  const average = metrics.reduce((sum, metric) => sum + metric.score, 0) / metrics.length;
-  const score = Math.max(0, Math.min(5, Math.round(average)));
-  return { score, cls: `acc-${score}`, label: `${score}/5 ${overallLabel(score)}`, average };
+  const weighted = metrics.reduce((sum, metric) =>
+    sum + (PREDICTION_METRIC_WEIGHTS[metric.label] || 0) * metric.score, 0
+  );
+  const score = Math.max(0, Math.min(5, Math.round(weighted)));
+  return { score, cls: `acc-${score}`, label: `${score}/5 ${overallLabel(score)}`, weighted };
 }
 
 function predictionMetricBreakdown(m) {
@@ -2351,7 +2362,7 @@ function predictionMetricBreakdown(m) {
   if (!metrics || !overall) return [];
 
   return [
-    metricTier(overall.score, "Overall", `${overall.label.replace(/^\d\/5\s*/, "")} (${overall.average.toFixed(1)} factor avg)`),
+    metricTier(overall.score, "Overall", `${overall.label.replace(/^\d\/5\s*/, "")} (${overall.weighted.toFixed(1)} weighted score)`),
     ...metrics,
   ];
 }
