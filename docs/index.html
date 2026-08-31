@@ -2244,7 +2244,8 @@ function goalBand(totalGoals) {
 function goalBandScore(projectedTotal, actualTotal) {
   const projectedBand = goalBand(projectedTotal);
   const actualBand = goalBand(actualTotal);
-  if (projectedBand === actualBand) return 5;
+  const totalError = Math.abs(projectedTotal - actualTotal);
+  if (projectedBand === actualBand) return metricScoreByError(totalError, 0.5, 1, 1.5, 2.5, 3.5);
   if (projectedTotal >= 3 && actualTotal >= 4) return 4;
   if (projectedTotal >= 2.5 && actualTotal >= 3) return 3;
   if (projectedTotal < 2 && actualTotal < 3) return 3;
@@ -2274,7 +2275,9 @@ function predictionFactorMetrics(m) {
     ? 5
     : (actualResult === "draw" || projectedResult === "draw") && Math.abs(actualGD) <= 1 && Math.abs(projGD) <= 0.25
       ? 2
-      : 1;
+      : actualResult !== "draw" && projectedResult !== "draw"
+        ? (Math.abs(projGD) >= 1 || Math.abs(actualGD) >= 2 || Math.abs(actualGD - projGD) >= 2.5 ? 0 : 1)
+        : 1;
 
   const gdError = Math.abs(actualGD - projGD);
   const homeScoreError = Math.abs(actualH - projH);
