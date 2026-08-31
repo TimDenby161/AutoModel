@@ -2106,6 +2106,25 @@ function marginBucket(gd) {
   return Math.abs(gd) < 1 ? "narrow" : "clear";
 }
 
+function poissonProbability(k, lambda) {
+  if (!Number.isFinite(k) || !Number.isFinite(lambda) || k < 0 || lambda < 0) return 0;
+  let factorial = 1;
+  for (let i = 2; i <= k; i++) factorial *= i;
+  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial;
+}
+
+function mostLikelyScore(projH, projA) {
+  let best = { home: 0, away: 0, probability: -1 };
+  const maxGoals = Math.max(8, Math.ceil(Math.max(projH, projA) + 6));
+  for (let home = 0; home <= maxGoals; home++) {
+    for (let away = 0; away <= maxGoals; away++) {
+      const probability = poissonProbability(home, projH) * poissonProbability(away, projA);
+      if (probability > best.probability) best = { home, away, probability };
+    }
+  }
+  return best;
+}
+
 // Scores the frozen pre-kickoff projection (SnapProjH/SnapProjA) on a 0-5
 // scale. Exact score proximity is rewarded first, then correct result and
 // margin shape, then progressively worse reads.
@@ -2137,7 +2156,9 @@ function scoreAccuracyTier(m) {
   const projectedClearWrongWay = marginBucket(projGD) === "clear" && Math.sign(projGD) !== Math.sign(actualGD);
 
   const tier = (score, label) => ({ score, cls: `acc-${score}`, label });
+  const likelyScore = mostLikelyScore(projH, projA);
 
+  if (likelyScore.home === actualH && likelyScore.away === actualA) return tier(5, "5/5 Exact Read");
   if (scoreError <= 0.75 && maxTeamScoreError <= 0.5) return tier(5, "5/5 Excellent");
   if (scoreError <= 1.5 && maxTeamScoreError <= 1) return tier(4, "4/5 Very Good");
 
