@@ -2226,6 +2226,23 @@ function metricScoreByError(error, excellent, good, decent, loose, poor) {
   return 0;
 }
 
+function goalBand(totalGoals) {
+  if (totalGoals < 2) return "low scoring";
+  if (totalGoals < 3) return "normal scoring";
+  if (totalGoals < 4) return "high scoring";
+  return "very high scoring";
+}
+
+function goalBandScore(projectedTotal, actualTotal) {
+  const projectedBand = goalBand(projectedTotal);
+  const actualBand = goalBand(actualTotal);
+  if (projectedBand === actualBand) return 5;
+  if (projectedTotal >= 3 && actualTotal >= 4) return 4;
+  if (projectedTotal >= 2.5 && actualTotal >= 3) return 3;
+  if (projectedTotal < 2 && actualTotal < 3) return 3;
+  return 1;
+}
+
 function predictionFactorMetrics(m) {
   const actual = finalScore(m);
   const actualH = actual ? actual.home : NaN;
@@ -2242,7 +2259,8 @@ function predictionFactorMetrics(m) {
   const actualTotal = actualH + actualA;
   const projectedTotal = projH + projA;
   const totalError = Math.abs(actualTotal - projectedTotal);
-  const goalsScore = metricScoreByError(totalError, 0.5, 1, 1.5, 2.5, 3.5);
+  const exactGoalsScore = metricScoreByError(totalError, 0.5, 1, 1.5, 2.5, 3.5);
+  const goalsScore = Math.max(exactGoalsScore, goalBandScore(projectedTotal, actualTotal));
 
   const actualResult = resultLabel(actualGD);
   const projectedResult = resultLabel(likelyGD);
@@ -2265,7 +2283,7 @@ function predictionFactorMetrics(m) {
   const cleanSheetScore = cleanSheetHits === 2 ? 5 : cleanSheetHits === 1 ? 3 : 0;
 
   return [
-    metricTier(goalsScore, "Goals", `${projectedTotal.toFixed(1)} predicted, ${actualTotal} actual (${totalError.toFixed(1)} off)`),
+    metricTier(goalsScore, "Goals", `${projectedTotal.toFixed(1)} predicted, ${actualTotal} actual; ${goalBand(projectedTotal)} vs ${goalBand(actualTotal)} (${totalError.toFixed(1)} off)`),
     metricTier(winnerScore, "Winner", `${projectedResult} projected, ${actualResult} actual`),
     metricTier(marginScore, "Margin", `${projGD.toFixed(1)} projected GD, ${actualGD} actual GD`),
     metricTier(shapeScore, "Shape", `${projectedShape} projected, ${actualShape} actual`),
