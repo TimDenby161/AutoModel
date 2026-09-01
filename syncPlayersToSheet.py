@@ -670,16 +670,32 @@ def normalize_sheet_value(value: Any) -> str:
     return str(number)
 
 
-def individual_result_key(values: tuple[Any, Any, Any, Any, Any]) -> tuple[str, str, str, str, str] | None:
+def find_column(header: list[Any], name: str) -> int:
+    """0-based index of `name` in `header` - raises instead of silently
+    writing into the wrong cell if Individual Results' column layout has
+    changed since this was last updated (it already has, more than once)."""
+    for i, value in enumerate(header):
+        if str(value).strip() == name:
+            return i
+    raise SystemExit(
+        f'Individual Results is missing a "{name}" column - its layout has '
+        "changed; update sync_individual_results to match."
+    )
+
+
+# values: (Date, Home Club ID, Home name, Away Club ID, Away name, Home
+# score, Away score). Keyed on name rather than ID for dedup, since name is
+# always populated but ID may still be blank for a club not yet ID-mapped.
+def individual_result_key(values: tuple[Any, ...]) -> tuple[str, str, str, str, str] | None:
     match_date = parse_sheet_date(values[0])
     if not match_date:
         return None
     return (
         match_date.isoformat(),
-        normalize_sheet_value(values[1]),
         normalize_sheet_value(values[2]),
-        normalize_sheet_value(values[3]),
         normalize_sheet_value(values[4]),
+        normalize_sheet_value(values[5]),
+        normalize_sheet_value(values[6]),
     )
 
 
@@ -756,24 +772,6 @@ def ensure_individual_result_formula_rows(
     return end_row - copy_start_row + 1
 
 
-def load_alt_names(spreadsheet) -> dict[str, str]:
-    """Mirrors the Matches tab's HomeAlt/AwayAlt formulas
-    (IFERROR(INDEX(AltNames!B:B, MATCH(name, AltNames!A:A, 0)), name)) in
-    Python, so Individual Results can be built without reading the Matches
-    tab at all."""
-    try:
-        worksheet = spreadsheet.worksheet("AltNames")
-    except gspread.WorksheetNotFound:
-        return {}
-    values = sheet_call(lambda: worksheet.get("A:B"), description="Read AltNames tab")
-    mapping: dict[str, str] = {}
-    for row in values[1:]:
-        name, alt = value_at(row, 0), value_at(row, 1)
-        if name and alt:
-            mapping[str(name).strip()] = str(alt).strip()
-    return mapping
-
-
 SCORE_TEXT_RE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
 
 
@@ -791,26 +789,33 @@ def regulation_score(score_text: Any, home_score: Any, away_score: Any) -> tuple
 
 def individual_results_rows_from_matches(
     spreadsheet, all_matches: dict[str, dict[str, Any]]
-) -> list[tuple[Any, Any, Any, Any, Any]]:
+) -> list[tuple[Any, Any, Any, Any, Any, Any, Any]]:
     """Builds Individual Results source rows straight from this run's full,
     unfiltered match fetch - independent of whatever competitions MatchData/
     Matches themselves are currently scoped to, so Individual Results (the
     Club Ranking spreadsheet) keeps receiving every competition's finished
-    matches even after MatchData/Matches are narrowed down."""
-    alt_names = load_alt_names(spreadsheet)
-    rows: list[tuple[Any, Any, Any, Any, Any]] = []
+    matches even after MatchData/Matches are narrowed down.
+
+    Returns (Date, Home Club ID, Home name, Away Club ID, Away name, Home
+    score, Away score) - both the real FotMob Club ID (getMatches.py already
+    resolves it, the same ID used everywhere else in this project, e.g.
+    Club!A "Club ID") and the name. The Club Ranking spreadsheet's own
+    Ranking Breakdown/Ranking tabs now match by ID first, falling back to
+    name only for clubs it hasn't ID-mapped yet - keeping both here lets
+    that fallback keep working."""
+    rows: list[tuple[Any, Any, Any, Any, Any, Any, Any]] = []
     for row in all_matches.values():
         if not row.get("Finished") or row.get("Cancelled"):
             continue
-        home = str(row.get("Home Club", "") or "")
-        away = str(row.get("Away Club", "") or "")
         home_score, away_score = regulation_score(
             row.get("Score", ""), row.get("Home Score", ""), row.get("Away Score", "")
         )
         rows.append((
             row.get("Match UTC", ""),
-            alt_names.get(home, home),
-            alt_names.get(away, away),
+            row.get("Home Club ID", ""),
+            row.get("Home Club", ""),
+            row.get("Away Club ID", ""),
+            row.get("Away Club", ""),
             home_score,
             away_score,
         ))
@@ -819,7 +824,7 @@ def individual_results_rows_from_matches(
 
 def individual_results_rows_from_sheet(
     spreadsheet, args: argparse.Namespace
-) -> list[tuple[Any, Any, Any, Any, Any]]:
+) -> list[tuple[Any, Any, Any, Any, Any, Any, Any]]:
     """Fallback used only when this run has no fresh in-memory match data
     (--only-individual-results, or --skip-matches) - reads whatever's
     currently in the Matches/MatchData tabs, same as before this function was
@@ -849,7 +854,7 @@ def individual_results_rows_from_sheet(
         if match_id and finished in {"1", "true", "yes", "finished"}:
             finished_ids.add(match_id)
 
-    rows: list[tuple[Any, Any, Any, Any, Any]] = []
+    rows: list[tuple[Any, Any, Any, Any, Any, Any, Any]] = []
     for row in matches_values[MATCHES_DATA_START_ROW - 1 :]:
         match_id = normalize_sheet_value(value_at(row, 0))
         if match_id not in finished_ids:
@@ -861,8 +866,10 @@ def individual_results_rows_from_sheet(
         )
         rows.append((
             value_at(row, 1),   # B: Date
-            value_at(row, 11),  # L: HomeAlt
-            value_at(row, 14),  # O: AwayAlt
+            value_at(row, 9),   # J: Home Club ID
+            value_at(row, 10),  # K: Home
+            value_at(row, 12),  # M: Away Club ID
+            value_at(row, 13),  # N: Away
             home_score,
             away_score,
         ))
@@ -893,10 +900,25 @@ def sync_individual_results(
         lambda: destination.get_all_values(value_render_option="FORMATTED_VALUE"),
         description="Read Individual Results tab",
     )
+    if not destination_values:
+        raise SystemExit("Individual Results tab is empty - expected a header row.")
+
+    # Column positions are resolved by header name, not hardcoded letters -
+    # this sheet's layout has already changed shape more than once (new ID/
+    # audit columns added directly in Sheets), and a stale hardcoded letter
+    # would silently write a score into the wrong cell instead of failing.
+    header = destination_values[0]
+    date_col = find_column(header, "Date")
+    home_id_col = find_column(header, "Home ID")
+    home_name_col = find_column(header, "HomeTeam")
+    away_id_col = find_column(header, "Away ID")
+    away_name_col = find_column(header, "AwayTeam")
+    home_score_col = find_column(header, "FTHG")
+    away_score_col = find_column(header, "FTAG")
 
     dated_destination_rows: list[tuple[date, int, list[Any]]] = []
     for offset, row in enumerate(destination_values[1:], start=2):
-        row_date = parse_sheet_date(value_at(row, 1))
+        row_date = parse_sheet_date(value_at(row, date_col))
         if row_date:
             dated_destination_rows.append((row_date, offset, row))
     max_date = max((row_date for row_date, _, _ in dated_destination_rows), default=None)
@@ -912,11 +934,13 @@ def sync_individual_results(
                 continue
             key = individual_result_key(
                 (
-                    value_at(row, 1),  # B: Date
-                    value_at(row, 2),  # C: Home
-                    value_at(row, 5),  # F: Away
-                    value_at(row, 8),  # I: Home score
-                    value_at(row, 9),  # J: Away score
+                    value_at(row, date_col),
+                    "",
+                    value_at(row, home_name_col),
+                    "",
+                    value_at(row, away_name_col),
+                    value_at(row, home_score_col),
+                    value_at(row, away_score_col),
                 )
             )
             if key:
@@ -924,7 +948,7 @@ def sync_individual_results(
 
     today = datetime.now().date()
     skipped_future = 0
-    rows_to_add: list[tuple[date, tuple[Any, Any, Any, Any, Any]]] = []
+    rows_to_add: list[tuple[date, tuple[Any, ...]]] = []
     for result_values in finished_rows:
         key = individual_result_key(result_values)
         if not key:
@@ -956,21 +980,32 @@ def sync_individual_results(
         destination_spreadsheet, destination, start_row, end_row
     )
 
+    date_letter = column_letters(date_col + 1)
+    home_id_letter = column_letters(home_id_col + 1)
+    home_name_letter = column_letters(home_name_col + 1)
+    away_id_letter = column_letters(away_id_col + 1)
+    away_name_letter = column_letters(away_name_col + 1)
+    home_score_letter = column_letters(home_score_col + 1)
+    away_score_letter = column_letters(away_score_col + 1)
+
     updates = []
     for offset, (match_date, values) in enumerate(rows_to_add):
         row_number = start_row + offset
+        _, home_id, home_name, away_id, away_name, home_score, away_score = values
         updates.extend(
             [
-                {"range": f"B{row_number}", "values": [[match_date.strftime("%d/%m/%Y")]]},
-                {"range": f"C{row_number}", "values": [[values[1]]]},
-                {"range": f"F{row_number}", "values": [[values[2]]]},
-                {"range": f"I{row_number}", "values": [[values[3]]]},
-                {"range": f"J{row_number}", "values": [[values[4]]]},
+                {"range": f"{date_letter}{row_number}", "values": [[match_date.strftime("%d/%m/%Y")]]},
+                {"range": f"{home_id_letter}{row_number}", "values": [[home_id]]},
+                {"range": f"{home_name_letter}{row_number}", "values": [[home_name]]},
+                {"range": f"{away_id_letter}{row_number}", "values": [[away_id]]},
+                {"range": f"{away_name_letter}{row_number}", "values": [[away_name]]},
+                {"range": f"{home_score_letter}{row_number}", "values": [[home_score]]},
+                {"range": f"{away_score_letter}{row_number}", "values": [[away_score]]},
             ]
         )
 
-    for start in range(0, len(updates), args.sheet_batch_size * 5):
-        chunk = updates[start : start + args.sheet_batch_size * 5]
+    for start in range(0, len(updates), args.sheet_batch_size * 7):
+        chunk = updates[start : start + args.sheet_batch_size * 7]
         sheet_call(
             lambda chunk=chunk: destination.batch_update(
                 [dict(item) for item in chunk], value_input_option="USER_ENTERED"
