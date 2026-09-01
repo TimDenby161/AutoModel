@@ -995,9 +995,14 @@ def sync_individual_results(
         updates.extend(
             [
                 {"range": f"{date_letter}{row_number}", "values": [[match_date.strftime("%d/%m/%Y")]]},
-                {"range": f"{home_id_letter}{row_number}", "values": [[home_id]]},
+                # A leading apostrophe forces text even under USER_ENTERED -
+                # without it Sheets auto-detects a numeric-looking ID string
+                # as a number, which silently breaks every ID-keyed VLOOKUP/
+                # CONCAT match against Individual Results' own ID columns
+                # (also text) the moment the two sides' types disagree.
+                {"range": f"{home_id_letter}{row_number}", "values": [[f"'{home_id}" if home_id else ""]]},
                 {"range": f"{home_name_letter}{row_number}", "values": [[home_name]]},
-                {"range": f"{away_id_letter}{row_number}", "values": [[away_id]]},
+                {"range": f"{away_id_letter}{row_number}", "values": [[f"'{away_id}" if away_id else ""]]},
                 {"range": f"{away_name_letter}{row_number}", "values": [[away_name]]},
                 {"range": f"{home_score_letter}{row_number}", "values": [[home_score]]},
                 {"range": f"{away_score_letter}{row_number}", "values": [[away_score]]},
