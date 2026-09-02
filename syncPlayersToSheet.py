@@ -398,7 +398,67 @@ def column_letters(count: int) -> str:
     return "".join(ch for ch in letters if ch.isalpha())
 
 
-def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call"):
+def force_ids_text(worksheet, cells: dict[int, dict[int, Any]]) -> None:
+    """Force specific (row, column) cells to Plain Text via a raw updateCells
+    request. A normal values-API write (RAW or USER_ENTERED) isn't reliable
+    for this - Sheets can still auto-detect a numeric-looking string as a
+    NUMBER, which silently breaks any exact-type VLOOKUP/MATCH/INDEX lookup
+    keyed on that ID later. `cells` maps 1-based row number -> {0-based
+    column index: value}."""
+    requests = []
+    for row_number, col_values in cells.items():
+        for col_index, value in col_values.items():
+            if value in (None, ""):
+                continue
+            requests.append(
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": row_number - 1,
+                            "endRowIndex": row_number,
+                            "startColumnIndex": col_index,
+                            "endColumnIndex": col_index + 1,
+                        },
+                        "rows": [{"values": [{"userEnteredValue": {"stringValue": str(value)}}]}],
+                        "fields": "userEnteredValue",
+                    }
+                }
+            )
+    for start in range(0, len(requests), 500):
+        chunk = requests[start : start + 500]
+        # Best-effort hardening, not critical path - the actual data write
+        # already succeeded before this runs. A persistently-unavailable API
+        # shouldn't be allowed to take down an otherwise-successful sync, so
+        # this fails fast (few retries, short backoff cap) and just warns
+        # rather than raising.
+        try:
+            sheet_call(
+                lambda chunk=chunk: worksheet.spreadsheet.batch_update({"requests": chunk}),
+                description=f"Force ID columns to text ({start + 1}-{start + len(chunk)})",
+                retries=3,
+                backoff_cap=8,
+            )
+        except RuntimeError as exc:
+            safe_print(f"Warning: couldn't force ID columns to text ({start + 1}-{start + len(chunk)}): {exc}")
+
+
+def force_id_columns_text(
+    worksheet, headers: list[str], id_headers: list[str], row_items: list[tuple[int, list[Any]]]
+) -> None:
+    """Force the given ID columns (by header name) to Plain Text for the
+    given (row_number, row) pairs - see force_ids_text for why."""
+    col_indices = [headers.index(h) for h in id_headers]
+    cells: dict[int, dict[int, Any]] = {}
+    for row_number, row in row_items:
+        col_values = {col: row[col] for col in col_indices if col < len(row)}
+        if col_values:
+            cells[row_number] = col_values
+    if cells:
+        force_ids_text(worksheet, cells)
+
+
+def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", backoff_cap: int = 30):
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -406,7 +466,7 @@ def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call"):
         except gspread.exceptions.APIError as exc:
             last_error = exc
             if attempt < retries:
-                wait = min(2**attempt, 30)
+                wait = min(2**attempt, backoff_cap)
                 safe_print(f"{description} failed ({exc}); retrying in {wait}s...")
                 time.sleep(wait)
     raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
@@ -511,16 +571,20 @@ def sync_lookup_tab(
         )
 
     if ids:
-        # The source sheet's ID column stores numbers; MATCH/XLOOKUP/INDEX
-        # do exact-type matching, so these must go in as numbers too or
-        # every lookup formula in this tab breaks.
         sheet_call(
             lambda: worksheet.update(
                 f"A{data_start_row}:A{new_last_row}",
-                [[int(item_id)] for item_id in ids],
+                [[item_id] for item_id in ids],
                 value_input_option="RAW",
             ),
             description=f"Write {worksheet_name} column A",
+        )
+        # MATCH/XLOOKUP/INDEX in this tab's formula columns do exact-type
+        # matching against the source *Data tab's ID column, which is kept
+        # as Plain Text too (see force_ids_text) - both sides must agree.
+        force_ids_text(
+            worksheet,
+            {data_start_row + i: {0: item_id} for i, item_id in enumerate(ids)},
         )
 
     # If the ID list shrank, column A above already blanked the leftover
@@ -1032,10 +1096,7 @@ def fetch_manager_row(manager_id: str, args: argparse.Namespace) -> list[Any]:
         manager_id, retries=args.manager_retries, request_delay=args.manager_request_delay
     )
     row_dict = gmgr.build_row(data, manager_id)
-    # The sheet's existing "Manager ID" column holds numbers; build_row
-    # returns it as a string, and writing that back as text would break
-    # any exact-match lookup against this column (same trap as Players!A).
-    row_dict["Manager ID"] = int(row_dict.get("Manager ID") or manager_id)
+    row_dict["Manager ID"] = row_dict.get("Manager ID") or manager_id
     return [row_dict.get(header, "") for header in gmgr.HEADERS]
 
 
@@ -1118,6 +1179,22 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
                 description=f"Append manager rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new managers to the sheet")
+
+    base_row = len(existing_values)
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # forced to text when IT was first appended, and re-forcing it on every
+    # refresh (which touches nearly the whole table each run) is wasted work
+    # that can turn into thousands of needless API calls per sync.
+    id_row_items = [
+        (base_row + 1 + i, row) for i, row in enumerate(appended_rows)
+    ]
+    if id_row_items:
+        force_id_columns_text(
+            worksheet,
+            gmgr.HEADERS,
+            ["Manager ID", "Current Club ID", "Last Match ID", "Last Opponent ID"],
+            id_row_items,
+        )
 
     final_by_id: dict[str, list[Any]] = {
         manager_id: list(existing_values[row_number - 1])
@@ -1584,6 +1661,29 @@ def sync_matches(
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
 
+    base_row = len(existing_values)
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # forced to text when IT was first appended, and re-forcing it on every
+    # refresh (which touches nearly the whole table each run) is wasted work
+    # that can turn into thousands of needless API calls per sync.
+    id_row_items = [
+        (base_row + 1 + i, row) for i, row in enumerate(appended_rows)
+    ]
+    if id_row_items:
+        force_id_columns_text(
+            worksheet,
+            gmatch.HEADERS,
+            [
+                "Match ID",
+                "Home Club ID",
+                "Away Club ID",
+                "Winner Club ID",
+                "Player Of The Match ID",
+                "Player Of The Match Club ID",
+            ],
+            id_row_items,
+        )
+
     if out_of_scope_rows:
         # Deleted last, using the row numbers captured before this run's
         # updates/appends: in-place updates don't move rows and appends only
@@ -1629,8 +1729,7 @@ def sync_matches(
 def fetch_club_row(club_id: str, args: argparse.Namespace) -> list[Any]:
     row = gclub.build_row(club_id, retries=args.club_retries, request_delay=args.club_request_delay)
     club_id_col = gclub.HEADERS.index("Club ID")
-    # ClubData!A stores IDs as numbers (same trap as the other tabs).
-    row[club_id_col] = int(row[club_id_col] or club_id)
+    row[club_id_col] = row[club_id_col] or club_id
     return row
 
 
@@ -1716,6 +1815,22 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
                 description=f"Append club rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new clubs to the sheet")
+
+    base_row = len(existing_values)
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # forced to text when IT was first appended, and re-forcing it on every
+    # refresh (which touches nearly the whole table each run) is wasted work
+    # that can turn into thousands of needless API calls per sync.
+    id_row_items = [
+        (base_row + 1 + i, row) for i, row in enumerate(appended_rows)
+    ]
+    if id_row_items:
+        force_id_columns_text(
+            worksheet,
+            gclub.HEADERS,
+            ["Club ID", "Coach ID", "Next Match ID", "Next Opponent ID", "Last Match ID", "Last Opponent ID"],
+            id_row_items,
+        )
 
     final_by_id: dict[str, list[Any]] = {
         club_id: list(existing_values[row_number - 1])
@@ -1833,6 +1948,17 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
                 description=f"Append rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new rows to the sheet")
+
+    base_row = len(existing_values)
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # forced to text when IT was first appended, and re-forcing it on every
+    # refresh (which touches nearly the whole table each run) is wasted work
+    # that can turn into thousands of needless API calls per sync.
+    id_row_items = [
+        (base_row + 1 + i, row) for i, row in enumerate(appended_rows)
+    ]
+    if id_row_items:
+        force_id_columns_text(worksheet, gp.HEADERS, ["Player ID", "Current Club ID"], id_row_items)
 
     # Rebuild the CSV mirror from the same in-memory dataset (existing rows +
     # this run's updates/appends) so it always matches the sheet.
