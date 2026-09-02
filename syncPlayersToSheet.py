@@ -1157,7 +1157,16 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             "ManagerData's header row doesn't match getManagers.py's current "
             "HEADERS layout. Clear the sheet or fix the header before syncing."
         )
-    manager_id_headers = ["Manager ID", "Current Club ID", "Last Match ID", "Last Opponent ID"]
+    manager_id_headers = [
+        "Manager ID",
+        "Current Club ID",
+        "Career Club IDs",
+        "Trophy Club IDs",
+        "Competition IDs Won",
+        "Last Match ID",
+        "Last Opponent ID",
+        "Last Competition ID",
+    ]
     set_plain_text_columns_by_header(worksheet, gmgr.HEADERS, manager_id_headers, start_row=2)
 
     manager_id_col = gmgr.HEADERS.index("Manager ID")
@@ -1291,7 +1300,17 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
             "CompetitionData's header row doesn't match getCompetitions.py's "
             "current HEADERS layout. Clear the sheet or fix the header before syncing."
         )
-    competition_id_headers = ["Competition ID", "Parent Competition ID"]
+    competition_id_headers = [
+        "Competition ID",
+        "Tournament ID",
+        "Season Tournament IDs",
+        "Previous Winner Club ID",
+        "Previous Runner-Up Club ID",
+        "Team IDs",
+        "Next Match ID",
+        "Next Home Club ID",
+        "Next Away Club ID",
+    ]
     set_plain_text_columns_by_header(worksheet, gcomp.HEADERS, competition_id_headers, start_row=2)
 
     competition_id_col = gcomp.HEADERS.index("Competition ID")
@@ -1597,6 +1616,8 @@ def sync_matches(
         )
     match_id_headers = [
         "Match ID",
+        "Competition ID",
+        "Parent Competition ID",
         "Home Club ID",
         "Away Club ID",
         "Winner Club ID",
@@ -1805,7 +1826,24 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
             "ClubData's header row doesn't match getClubs.py's current "
             "HEADERS layout. Clear the sheet or fix the header before syncing."
         )
-    club_id_headers = ["Club ID", "Coach ID", "Next Match ID", "Next Opponent ID", "Last Match ID", "Last Opponent ID"]
+    club_id_headers = [
+        "Club ID",
+        "Primary League ID",
+        "Current Tournament ID",
+        "Coach ID",
+        "Goalkeeper IDs",
+        "Defender IDs",
+        "Midfielder IDs",
+        "Forward IDs",
+        "Squad Player IDs",
+        "Competition IDs",
+        "Next Match ID",
+        "Next Opponent ID",
+        "Next Competition ID",
+        "Last Match ID",
+        "Last Opponent ID",
+        "Last Competition ID",
+    ]
     set_plain_text_columns_by_header(worksheet, gclub.HEADERS, club_id_headers, start_row=2)
 
     club_id_col = gclub.HEADERS.index("Club ID")
