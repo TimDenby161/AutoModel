@@ -611,6 +611,14 @@ def sync_lookup_tab(
 
     added_rows = new_last_row - formula_last_row
     if added_rows > 0 and formula_last_row >= data_start_row:
+        # copyPaste refuses to run at all if a basic filter (Data > Create a
+        # filter) is hiding any row in range - clear it first. Best-effort:
+        # this fails harmlessly if there's no filter to remove.
+        try:
+            spreadsheet.batch_update({"requests": [{"deleteFilter": {"sheetId": worksheet.id}}]})
+        except gspread.exceptions.APIError:
+            pass
+
         copy_request = {
             "requests": [
                 {
