@@ -656,7 +656,7 @@ def sync_lookup_tab(
         # filter) is hiding any row in range - clear it first. Best-effort:
         # this fails harmlessly if there's no filter to remove.
         try:
-            spreadsheet.batch_update({"requests": [{"deleteFilter": {"sheetId": worksheet.id}}]})
+            spreadsheet.batch_update({"requests": [{"clearBasicFilter": {"sheetId": worksheet.id}}]})
         except gspread.exceptions.APIError:
             pass
 

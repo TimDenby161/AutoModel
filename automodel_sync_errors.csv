@@ -1,2 +1,5 @@
 ﻿ID,Error
-770251,request failed after 4 attempts: HTTP Error 502: Bad Gateway
+1457626,'NoneType' object has no attribute 'get'
+1029778,'NoneType' object has no attribute 'get'
+799263,'NoneType' object has no attribute 'get'
+1677184,'NoneType' object has no attribute 'get'
