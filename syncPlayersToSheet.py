@@ -73,6 +73,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
+
 import getPlayers as gp
 import getManagers as gmgr
 import getCompetitions as gcomp
@@ -503,7 +505,7 @@ def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", ba
     for attempt in range(1, retries + 1):
         try:
             return fn()
-        except gspread.exceptions.APIError as exc:
+        except (gspread.exceptions.APIError, requests.exceptions.RequestException) as exc:
             last_error = exc
             if attempt < retries:
                 wait = min(2**attempt, backoff_cap)
@@ -1241,9 +1243,12 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new managers to the sheet")
 
     base_row = len(existing_values)
-    # Reassert ID cells as string values after data writes so exact-match
-    # lookups don't drift into text-vs-number mismatches.
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # set correctly (both by set_plain_text_columns_by_header's column
+    # format and, if it's an old row, a previous run's force here), and
+    # re-checking every existing row on every single sync run is exactly
+    # what turns this into a multi-thousand-row operation for no benefit.
+    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1382,7 +1387,7 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new competitions to the sheet")
 
     base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1750,17 +1755,11 @@ def sync_matches(
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
 
     base_row = len(existing_values)
-    # Reassert ID cells as string values after data writes so exact-match
-    # lookups don't drift into text-vs-number mismatches.
-    existing_id_row_items = [
-        (offset + 2, (row + [""] * (header_len - len(row)))[:header_len])
-        for offset, row in enumerate(existing_values[1:])
-    ]
-    id_row_items = (
-        existing_id_row_items
-        + updates
-        + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    )
+    # Only brand-new rows need this - see the equivalent comment in
+    # sync_clubs/sync_managers/etc. Re-checking all 7,000+ existing MatchData
+    # rows on every single run (as this used to do) is exactly the kind of
+    # multi-thousand-row operation that made this sync hang for minutes.
+    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1921,9 +1920,12 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new clubs to the sheet")
 
     base_row = len(existing_values)
-    # Reassert ID cells as string values after data writes so exact-match
-    # lookups don't drift into text-vs-number mismatches.
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # set correctly (both by set_plain_text_columns_by_header's column
+    # format and, if it's an old row, a previous run's force here), and
+    # re-checking every existing row on every single sync run is exactly
+    # what turns this into a multi-thousand-row operation for no benefit.
+    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -2052,9 +2054,12 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new rows to the sheet")
 
     base_row = len(existing_values)
-    # Reassert ID cells as string values after data writes so exact-match
-    # lookups don't drift into text-vs-number mismatches.
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    # Only brand-new rows need this - an existing row's ID cell was already
+    # set correctly (both by set_plain_text_columns_by_header's column
+    # format and, if it's an old row, a previous run's force here), and
+    # re-checking every existing row on every single sync run is exactly
+    # what turns this into a multi-thousand-row operation for no benefit.
+    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(worksheet, gp.HEADERS, player_id_headers, id_row_items)
 
