@@ -552,6 +552,11 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
         pass
 
     gc = gspread.service_account(filename=str(credentials_path))
+    # Without this, a stalled connection blocks forever - sheet_call's
+    # retry/backoff logic only ever runs after a request actually raises,
+    # so a request that just hangs waiting for a response (no error, no
+    # timeout) can't be retried and the whole script sits there indefinitely.
+    gc.set_timeout((10, 60))
     try:
         return gc.open_by_key(spreadsheet_id)
     except PermissionError as exc:
@@ -1177,7 +1182,6 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
         "Last Opponent ID",
         "Last Competition ID",
     ]
-    set_plain_text_columns_by_header(worksheet, gmgr.HEADERS, manager_id_headers, start_row=2)
 
     manager_id_col = gmgr.HEADERS.index("Manager ID")
     existing_by_id: dict[str, int] = {}
@@ -1242,13 +1246,13 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new managers to the sheet")
 
+    # Every manager gets fully refreshed every run (see comment above), so
+    # column-level TEXT format alone won't hold - the RAW write above just
+    # reset it for every row, and it must be reapplied after writing, then
+    # every rewritten row's ID cells reasserted as text same as it does.
+    set_plain_text_columns_by_header(worksheet, gmgr.HEADERS, manager_id_headers, start_row=2)
     base_row = len(existing_values)
-    # Only brand-new rows need this - an existing row's ID cell was already
-    # set correctly (both by set_plain_text_columns_by_header's column
-    # format and, if it's an old row, a previous run's force here), and
-    # re-checking every existing row on every single sync run is exactly
-    # what turns this into a multi-thousand-row operation for no benefit.
-    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1324,7 +1328,6 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
         "Next Home Club ID",
         "Next Away Club ID",
     ]
-    set_plain_text_columns_by_header(worksheet, gcomp.HEADERS, competition_id_headers, start_row=2)
 
     competition_id_col = gcomp.HEADERS.index("Competition ID")
     existing_by_id: dict[str, int] = {}
@@ -1386,8 +1389,12 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new competitions to the sheet")
 
+    # Every competition gets fully refreshed every run (same as managers/
+    # clubs), so format must be reapplied after writing, and every
+    # rewritten row's ID cells reasserted as text, not just new ones.
+    set_plain_text_columns_by_header(worksheet, gcomp.HEADERS, competition_id_headers, start_row=2)
     base_row = len(existing_values)
-    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1637,7 +1644,6 @@ def sync_matches(
         "Player Of The Match ID",
         "Player Of The Match Club ID",
     ]
-    set_plain_text_columns_by_header(worksheet, gmatch.HEADERS, match_id_headers, start_row=2)
 
     match_id_col = gmatch.HEADERS.index("Match ID")
     match_utc_col = gmatch.HEADERS.index("Match UTC")
@@ -1754,12 +1760,16 @@ def sync_matches(
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
 
+    # Format must be reapplied after writing (see sync_clubs/sync_managers/
+    # etc. for why) - but unlike those, this sync only rewrites rows that
+    # are actually due for a refresh (see the skip logic above), so `updates`
+    # here is small, not the whole table. Re-checking all 7,000+ existing
+    # MatchData rows regardless of whether they were touched this run (as
+    # this used to do) is exactly the kind of multi-thousand-row operation
+    # that made this sync hang for minutes.
+    set_plain_text_columns_by_header(worksheet, gmatch.HEADERS, match_id_headers, start_row=2)
     base_row = len(existing_values)
-    # Only brand-new rows need this - see the equivalent comment in
-    # sync_clubs/sync_managers/etc. Re-checking all 7,000+ existing MatchData
-    # rows on every single run (as this used to do) is exactly the kind of
-    # multi-thousand-row operation that made this sync hang for minutes.
-    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1851,7 +1861,6 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
         "Last Opponent ID",
         "Last Competition ID",
     ]
-    set_plain_text_columns_by_header(worksheet, gclub.HEADERS, club_id_headers, start_row=2)
 
     club_id_col = gclub.HEADERS.index("Club ID")
     existing_by_id: dict[str, int] = {}
@@ -1919,13 +1928,12 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new clubs to the sheet")
 
+    # Every club gets fully refreshed every run (see comment above), so
+    # column format must be reapplied after writing, and every rewritten
+    # row's ID cells reasserted as text - not just newly-appended ones.
+    set_plain_text_columns_by_header(worksheet, gclub.HEADERS, club_id_headers, start_row=2)
     base_row = len(existing_values)
-    # Only brand-new rows need this - an existing row's ID cell was already
-    # set correctly (both by set_plain_text_columns_by_header's column
-    # format and, if it's an old row, a previous run's force here), and
-    # re-checking every existing row on every single sync run is exactly
-    # what turns this into a multi-thousand-row operation for no benefit.
-    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(
             worksheet,
@@ -1982,7 +1990,6 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
             "last written). Clear the sheet or fix the header before syncing."
         )
     player_id_headers = ["Player ID", "Current Club ID"]
-    set_plain_text_columns_by_header(worksheet, gp.HEADERS, player_id_headers, start_row=2)
 
     existing_by_id: dict[str, tuple[int, list[str]]] = {}
     for offset, row in enumerate(existing_values[1:]):
@@ -2053,13 +2060,16 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new rows to the sheet")
 
+    # Column-level TEXT format only affects how *future* input gets parsed -
+    # it doesn't retroactively convert a value the RAW write above just
+    # stored as a number, so it must be (re)applied after writing, not
+    # before. And unlike matches (which only rewrites rows actually due for
+    # an update), this sync fully refreshes every existing player every run,
+    # so every row just got its ID cell rewritten and needs reasserting -
+    # there's no "only new rows" shortcut available here.
+    set_plain_text_columns_by_header(worksheet, gp.HEADERS, player_id_headers, start_row=2)
     base_row = len(existing_values)
-    # Only brand-new rows need this - an existing row's ID cell was already
-    # set correctly (both by set_plain_text_columns_by_header's column
-    # format and, if it's an old row, a previous run's force here), and
-    # re-checking every existing row on every single sync run is exactly
-    # what turns this into a multi-thousand-row operation for no benefit.
-    id_row_items = [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
+    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
     if id_row_items:
         force_id_columns_text(worksheet, gp.HEADERS, player_id_headers, id_row_items)
 
