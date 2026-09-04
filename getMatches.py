@@ -401,6 +401,13 @@ def collect_matches(
                 cached_row = cached_all.get(key)
                 if cached_row and cached_row.get("Round"):
                     row["Round"] = cached_row["Round"]
+                    # Competition ID from the lightweight per-club fixtures
+                    # list (fixture_row's tournament.leagueId) has been
+                    # observed wrong for a meaningful share of not-yet-played
+                    # fixtures - matchDetails' general.leagueId is the same
+                    # reliable field enrich() already trusts for finished
+                    # matches, so prefer it here too whenever it's available.
+                    row["Competition ID"] = cached_row.get("Competition ID") or row.get("Competition ID", "")
                     row["Parent Competition ID"] = row.get("Parent Competition ID") or cached_row.get("Parent Competition ID", "")
                     row["Country Code"] = row.get("Country Code") or cached_row.get("Country Code", "")
                     row["Gender"] = row.get("Gender") or cached_row.get("Gender", "")
@@ -417,6 +424,7 @@ def collect_matches(
                 try:
                     general = future.result().get("general") or {}
                     row["Round"] = general.get("matchRound", "")
+                    row["Competition ID"] = general.get("leagueId") or row.get("Competition ID", "")
                     row["Parent Competition ID"] = row.get("Parent Competition ID") or general.get("parentLeagueId", "")
                     row["Country Code"] = row.get("Country Code") or general.get("countryCode", "")
                     row["Gender"] = row.get("Gender") or general.get("gender", "")
