@@ -1535,6 +1535,7 @@ def sync_matches(
         "Match ID",
         "Competition ID",
         "Parent Competition ID",
+        "Round",
         "Home Club ID",
         "Away Club ID",
         "Winner Club ID",
