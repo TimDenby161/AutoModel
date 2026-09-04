@@ -400,104 +400,21 @@ def column_letters(count: int) -> str:
     return "".join(ch for ch in letters if ch.isalpha())
 
 
-def force_ids_text(worksheet, cells: dict[int, dict[int, Any]]) -> None:
-    """Force specific (row, column) cells to Plain Text via a raw updateCells
-    request. A normal values-API write (RAW or USER_ENTERED) isn't reliable
-    for this - Sheets can still auto-detect a numeric-looking string as a
-    NUMBER, which silently breaks any exact-type VLOOKUP/MATCH/INDEX lookup
-    keyed on that ID later. `cells` maps 1-based row number -> {0-based
-    column index: value}."""
-    requests = []
-    for row_number, col_values in cells.items():
-        for col_index, value in col_values.items():
-            if value in (None, ""):
-                continue
-            requests.append(
-                {
-                    "updateCells": {
-                        "range": {
-                            "sheetId": worksheet.id,
-                            "startRowIndex": row_number - 1,
-                            "endRowIndex": row_number,
-                            "startColumnIndex": col_index,
-                            "endColumnIndex": col_index + 1,
-                        },
-                        "rows": [{"values": [{"userEnteredValue": {"stringValue": str(value)}}]}],
-                        "fields": "userEnteredValue",
-                    }
-                }
-            )
-    for start in range(0, len(requests), 500):
-        chunk = requests[start : start + 500]
-        # Best-effort hardening, not critical path - the actual data write
-        # already succeeded before this runs. A persistently-unavailable API
-        # shouldn't be allowed to take down an otherwise-successful sync, so
-        # this fails fast (few retries, short backoff cap) and just warns
-        # rather than raising.
-        try:
-            sheet_call(
-                lambda chunk=chunk: worksheet.spreadsheet.batch_update({"requests": chunk}),
-                description=f"Force ID columns to text ({start + 1}-{start + len(chunk)})",
-                retries=3,
-                backoff_cap=8,
-            )
-        except RuntimeError as exc:
-            safe_print(f"Warning: couldn't force ID columns to text ({start + 1}-{start + len(chunk)}): {exc}")
-
-
-def set_plain_text_columns(worksheet, col_indices: list[int], *, start_row: int = 1) -> None:
-    """Format whole ID columns as Plain Text.
-
-    This is separate from force_ids_text: formatting the column prevents
-    future manual edits or formula copy-downs from re-interpreting an ID as a
-    number, while force_ids_text fixes the actual typed value in populated
-    cells.
-    """
-    requests = [
-        {
-            "repeatCell": {
-                "range": {
-                    "sheetId": worksheet.id,
-                    "startRowIndex": start_row - 1,
-                    "startColumnIndex": col_index,
-                    "endColumnIndex": col_index + 1,
-                },
-                "cell": {"userEnteredFormat": {"numberFormat": {"type": "TEXT"}}},
-                "fields": "userEnteredFormat.numberFormat",
-            }
-        }
-        for col_index in col_indices
-    ]
-    if requests:
-        sheet_call(
-            lambda: worksheet.spreadsheet.batch_update({"requests": requests}),
-            description=f"Set {worksheet.title} ID columns to Plain Text",
-        )
-
-
-def set_plain_text_columns_by_header(
-    worksheet, headers: list[str], id_headers: list[str], *, start_row: int = 1
-) -> None:
-    set_plain_text_columns(
-        worksheet,
-        [headers.index(header) for header in id_headers if header in headers],
-        start_row=start_row,
-    )
-
-
-def force_id_columns_text(
-    worksheet, headers: list[str], id_headers: list[str], row_items: list[tuple[int, list[Any]]]
-) -> None:
-    """Force the given ID columns (by header name) to Plain Text for the
-    given (row_number, row) pairs - see force_ids_text for why."""
-    col_indices = [headers.index(h) for h in id_headers]
-    cells: dict[int, dict[int, Any]] = {}
-    for row_number, row in row_items:
-        col_values = {col: row[col] for col in col_indices if col < len(row)}
-        if col_values:
-            cells[row_number] = col_values
-    if cells:
-        force_ids_text(worksheet, cells)
+def apply_number_ids(row: list[Any], headers: list[str], id_headers: list[str]) -> list[Any]:
+    """Coerce each of id_headers to a plain int in row (matched by header
+    name/position), so a plain RAW write lands as NUMBER on every ID field -
+    the same type the *Data/lookup tabs' own INDEX/MATCH/VLOOKUP formulas
+    expect on both sides, with no extra formatting/API calls needed.
+    Multi-value ID-list fields (e.g. "Squad Player IDs", pipe-joined) are
+    left untouched - int() fails on them and the original value is kept."""
+    for header in id_headers:
+        idx = headers.index(header)
+        if idx < len(row) and row[idx] not in (None, ""):
+            try:
+                row[idx] = int(row[idx])
+            except (TypeError, ValueError):
+                pass
+    return row
 
 
 def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", backoff_cap: int = 30):
@@ -594,7 +511,6 @@ def sync_lookup_tab(
     row's ID up by value (MATCH/XLOOKUP/INDEX), not by position."""
     last_col_index = gspread.utils.a1_to_rowcol(f"{last_formula_column}1")[1]
     worksheet = get_or_create_worksheet(spreadsheet, worksheet_name, last_col_index)
-    set_plain_text_columns(worksheet, [0], start_row=data_start_row)
     existing_count = len(worksheet.col_values(1)[data_start_row - 1 :])
     existing_last_row = data_start_row - 1 + existing_count
     new_last_row = data_start_row - 1 + len(ids)
@@ -619,20 +535,17 @@ def sync_lookup_tab(
         )
 
     if ids:
+        # MATCH/XLOOKUP/INDEX in this tab's formula columns do exact-type
+        # matching against the source *Data tab's ID column - both are kept
+        # as plain ints so a RAW write lands as NUMBER on both sides with no
+        # extra formatting pass needed.
         sheet_call(
             lambda: worksheet.update(
                 f"A{data_start_row}:A{new_last_row}",
-                [[item_id] for item_id in ids],
+                [[int(item_id)] for item_id in ids],
                 value_input_option="RAW",
             ),
             description=f"Write {worksheet_name} column A",
-        )
-        # MATCH/XLOOKUP/INDEX in this tab's formula columns do exact-type
-        # matching against the source *Data tab's ID column, which is kept
-        # as Plain Text too (see force_ids_text) - both sides must agree.
-        force_ids_text(
-            worksheet,
-            {data_start_row + i: {0: item_id} for i, item_id in enumerate(ids)},
         )
 
     # If the ID list shrank, column A above already blanked the leftover
@@ -1152,7 +1065,7 @@ def fetch_manager_row(manager_id: str, args: argparse.Namespace) -> list[Any]:
         manager_id, retries=args.manager_retries, request_delay=args.manager_request_delay
     )
     row_dict = gmgr.build_row(data, manager_id)
-    row_dict["Manager ID"] = row_dict.get("Manager ID") or manager_id
+    row_dict["Manager ID"] = int(row_dict.get("Manager ID") or manager_id)
     return [row_dict.get(header, "") for header in gmgr.HEADERS]
 
 
@@ -1207,7 +1120,7 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             manager_id = jobs[future]
             done += 1
             try:
-                row = future.result()
+                row = apply_number_ids(future.result(), gmgr.HEADERS, manager_id_headers)
             except Exception as exc:
                 errors.append((manager_id, str(exc)))
                 safe_print(f"[{done}/{total}] ERROR (manager) {manager_id}: {exc}")
@@ -1246,21 +1159,6 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new managers to the sheet")
 
-    # Every manager gets fully refreshed every run (see comment above), so
-    # column-level TEXT format alone won't hold - the RAW write above just
-    # reset it for every row, and it must be reapplied after writing, then
-    # every rewritten row's ID cells reasserted as text same as it does.
-    set_plain_text_columns_by_header(worksheet, gmgr.HEADERS, manager_id_headers, start_row=2)
-    base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    if id_row_items:
-        force_id_columns_text(
-            worksheet,
-            gmgr.HEADERS,
-            manager_id_headers,
-            id_row_items,
-        )
-
     final_by_id: dict[str, list[Any]] = {
         manager_id: list(existing_values[row_number - 1])
         for manager_id, row_number in existing_by_id.items()
@@ -1296,8 +1194,7 @@ def fetch_competition_row(competition_id: str, args: argparse.Namespace) -> list
         request_delay=args.competition_request_delay,
     )
     row_dict = gcomp.competition_row(competition_id, data)
-    # Keep IDs as text so exact-match formulas agree with the lookup tabs.
-    row_dict["Competition ID"] = str(row_dict.get("Competition ID") or competition_id)
+    row_dict["Competition ID"] = int(row_dict.get("Competition ID") or competition_id)
     return [row_dict.get(header, "") for header in gcomp.HEADERS]
 
 
@@ -1353,7 +1250,7 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
             competition_id = jobs[future]
             done += 1
             try:
-                row = future.result()
+                row = apply_number_ids(future.result(), gcomp.HEADERS, competition_id_headers)
             except Exception as exc:
                 errors.append((competition_id, str(exc)))
                 safe_print(f"[{done}/{total}] ERROR (competition) {competition_id}: {exc}")
@@ -1388,20 +1285,6 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
                 description=f"Append competition rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new competitions to the sheet")
-
-    # Every competition gets fully refreshed every run (same as managers/
-    # clubs), so format must be reapplied after writing, and every
-    # rewritten row's ID cells reasserted as text, not just new ones.
-    set_plain_text_columns_by_header(worksheet, gcomp.HEADERS, competition_id_headers, start_row=2)
-    base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    if id_row_items:
-        force_id_columns_text(
-            worksheet,
-            gcomp.HEADERS,
-            competition_id_headers,
-            id_row_items,
-        )
 
     final_by_id: dict[str, list[Any]] = {
         competition_id: list(existing_values[row_number - 1])
@@ -1710,7 +1593,7 @@ def sync_matches(
         if not match_in_scope(row_dict, keep_competition_ids):
             skipped_out_of_scope += 1
             continue
-        row = [row_dict.get(header, "") for header in gmatch.HEADERS]
+        row = apply_number_ids([row_dict.get(header, "") for header in gmatch.HEADERS], gmatch.HEADERS, match_id_headers)
         if match_id in existing_by_id:
             # An existing row is only worth rewriting if it's not finished
             # yet AND (its date has already passed, so it's actually due for
@@ -1760,24 +1643,6 @@ def sync_matches(
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
 
-    # Format must be reapplied after writing (see sync_clubs/sync_managers/
-    # etc. for why) - but unlike those, this sync only rewrites rows that
-    # are actually due for a refresh (see the skip logic above), so `updates`
-    # here is small, not the whole table. Re-checking all 7,000+ existing
-    # MatchData rows regardless of whether they were touched this run (as
-    # this used to do) is exactly the kind of multi-thousand-row operation
-    # that made this sync hang for minutes.
-    set_plain_text_columns_by_header(worksheet, gmatch.HEADERS, match_id_headers, start_row=2)
-    base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    if id_row_items:
-        force_id_columns_text(
-            worksheet,
-            gmatch.HEADERS,
-            match_id_headers,
-            id_row_items,
-        )
-
     if out_of_scope_rows:
         # Deleted last, using the row numbers captured before this run's
         # updates/appends: in-place updates don't move rows and appends only
@@ -1823,7 +1688,7 @@ def sync_matches(
 def fetch_club_row(club_id: str, args: argparse.Namespace) -> list[Any]:
     row = gclub.build_row(club_id, retries=args.club_retries, request_delay=args.club_request_delay)
     club_id_col = gclub.HEADERS.index("Club ID")
-    row[club_id_col] = row[club_id_col] or club_id
+    row[club_id_col] = int(row[club_id_col] or club_id)
     return row
 
 
@@ -1887,7 +1752,7 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
             club_id = jobs[future]
             done += 1
             try:
-                row = future.result()
+                row = apply_number_ids(future.result(), gclub.HEADERS, club_id_headers)
             except Exception as exc:
                 errors.append((club_id, str(exc)))
                 # A deleted/merged club ID is permanent, not worth retrying,
@@ -1927,20 +1792,6 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
                 description=f"Append club rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new clubs to the sheet")
-
-    # Every club gets fully refreshed every run (see comment above), so
-    # column format must be reapplied after writing, and every rewritten
-    # row's ID cells reasserted as text - not just newly-appended ones.
-    set_plain_text_columns_by_header(worksheet, gclub.HEADERS, club_id_headers, start_row=2)
-    base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    if id_row_items:
-        force_id_columns_text(
-            worksheet,
-            gclub.HEADERS,
-            club_id_headers,
-            id_row_items,
-        )
 
     final_by_id: dict[str, list[Any]] = {
         club_id: list(existing_values[row_number - 1])
@@ -2022,7 +1873,7 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
             kind, player_id = jobs[future]
             done += 1
             try:
-                row = future.result()
+                row = apply_number_ids(future.result(), gp.HEADERS, player_id_headers)
             except Exception as exc:
                 errors.append((player_id, str(exc)))
                 safe_print(f"[{done}/{total}] ERROR ({kind}) {player_id}: {exc}")
@@ -2059,19 +1910,6 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
                 description=f"Append rows {start + 1}-{start + len(chunk)}",
             )
             safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new rows to the sheet")
-
-    # Column-level TEXT format only affects how *future* input gets parsed -
-    # it doesn't retroactively convert a value the RAW write above just
-    # stored as a number, so it must be (re)applied after writing, not
-    # before. And unlike matches (which only rewrites rows actually due for
-    # an update), this sync fully refreshes every existing player every run,
-    # so every row just got its ID cell rewritten and needs reasserting -
-    # there's no "only new rows" shortcut available here.
-    set_plain_text_columns_by_header(worksheet, gp.HEADERS, player_id_headers, start_row=2)
-    base_row = len(existing_values)
-    id_row_items = updates + [(base_row + 1 + i, row) for i, row in enumerate(appended_rows)]
-    if id_row_items:
-        force_id_columns_text(worksheet, gp.HEADERS, player_id_headers, id_row_items)
 
     # Rebuild the CSV mirror from the same in-memory dataset (existing rows +
     # this run's updates/appends) so it always matches the sheet.
