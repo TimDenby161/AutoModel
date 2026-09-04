@@ -475,13 +475,16 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
     # timeout) can't be retried and the whole script sits there indefinitely.
     gc.set_timeout((10, 60))
     try:
-        return gc.open_by_key(spreadsheet_id)
+        return sheet_call(
+            lambda: gc.open_by_key(spreadsheet_id),
+            description=f"Open spreadsheet {spreadsheet_id}",
+        )
     except PermissionError as exc:
         raise SystemExit(
             f"Permission denied opening spreadsheet {spreadsheet_id}. Share it with "
             f"{service_account_email} as an Editor and try again."
         ) from exc
-    except gspread.exceptions.APIError as exc:
+    except RuntimeError as exc:
         if "PERMISSION_DENIED" in str(exc):
             raise SystemExit(
                 f"Permission denied opening spreadsheet {spreadsheet_id}. Share it with "
@@ -492,9 +495,20 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
 
 def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
     try:
-        return spreadsheet.worksheet(worksheet_name)
+        # worksheet() fetches metadata for the WHOLE spreadsheet (every tab),
+        # not just this one - a heavier call than most, so it needs the same
+        # retry protection as everything else. gspread.WorksheetNotFound
+        # isn't caught by sheet_call's except clause, so it still propagates
+        # straight through to the fallback below, unretried, as intended.
+        return sheet_call(
+            lambda: spreadsheet.worksheet(worksheet_name),
+            description=f"Open {worksheet_name} worksheet",
+        )
     except gspread.WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols)
+        return sheet_call(
+            lambda: spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols),
+            description=f"Create {worksheet_name} worksheet",
+        )
 
 
 def sync_lookup_tab(
@@ -862,8 +876,8 @@ def individual_results_rows_from_sheet(
     (--only-individual-results, or --skip-matches) - reads whatever's
     currently in the Matches/MatchData tabs, same as before this function was
     split up."""
-    source_matches = spreadsheet.worksheet(MATCHES_WORKSHEET)
-    source_matchdata = spreadsheet.worksheet(args.match_worksheet)
+    source_matches = sheet_call(lambda: spreadsheet.worksheet(MATCHES_WORKSHEET), description=f"Open {MATCHES_WORKSHEET} worksheet")
+    source_matchdata = sheet_call(lambda: spreadsheet.worksheet(args.match_worksheet), description=f"Open {args.match_worksheet} worksheet")
 
     matches_values = sheet_call(
         # A:AZ (not just A:Q) so column AY (Score) is available for
@@ -1346,8 +1360,8 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
     HomeScr/AwayScr (and everything derived from them) are literally
     formulas built on TODAY().
     """
-    match_worksheet = spreadsheet.worksheet(args.match_worksheet)
-    matches_worksheet = spreadsheet.worksheet(MATCHES_WORKSHEET)
+    match_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.match_worksheet), description=f"Open {args.match_worksheet} worksheet")
+    matches_worksheet = sheet_call(lambda: spreadsheet.worksheet(MATCHES_WORKSHEET), description=f"Open {MATCHES_WORKSHEET} worksheet")
 
     header_len = len(gmatch.HEADERS)
     snap_start_col = header_len + 1
@@ -1973,7 +1987,7 @@ def main() -> int:
     else:
         errors = sync_player_data(spreadsheet, args)
         if not args.skip_players_tab:
-            player_worksheet = spreadsheet.worksheet(args.worksheet)
+            player_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.worksheet), description=f"Open {args.worksheet} worksheet")
             playerdata_ids = id_column_values(player_worksheet, "Read final PlayerData IDs")[1:]
             sync_players_tab(spreadsheet, playerdata_ids)
     if errors:
@@ -1987,7 +2001,7 @@ def main() -> int:
     if not args.skip_competitions:
         competition_errors = sync_competitions(spreadsheet, args)
         if not args.skip_leagues_tab:
-            competition_worksheet = spreadsheet.worksheet(args.competition_worksheet)
+            competition_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.competition_worksheet), description=f"Open {args.competition_worksheet} worksheet")
             competition_ids = id_column_values(
                 competition_worksheet, "Read final CompetitionData IDs"
             )[1:]
@@ -1998,7 +2012,7 @@ def main() -> int:
     if not args.skip_matches:
         match_errors, all_matches = sync_matches(spreadsheet, args)
         if not args.skip_matches_tab:
-            match_worksheet = spreadsheet.worksheet(args.match_worksheet)
+            match_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.match_worksheet), description=f"Open {args.match_worksheet} worksheet")
             matchdata_ids = id_column_values(match_worksheet, "Read final MatchData IDs")[1:]
             sync_matches_tab(spreadsheet, matchdata_ids)
         if not args.skip_projection_snapshot:
@@ -2015,7 +2029,7 @@ def main() -> int:
     if not args.skip_clubs:
         club_errors = sync_clubs(spreadsheet, args)
         if not args.skip_club_tab:
-            club_worksheet = spreadsheet.worksheet(args.club_worksheet)
+            club_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.club_worksheet), description=f"Open {args.club_worksheet} worksheet")
             clubdata_ids = id_column_values(club_worksheet, "Read final ClubData IDs")[1:]
             sync_club_tab(spreadsheet, clubdata_ids)
 
