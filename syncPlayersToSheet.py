@@ -453,6 +453,28 @@ def id_column_values(worksheet, description: str) -> list[str]:
     )
 
 
+def csv_id_values(path: Path, description: str) -> list[str]:
+    """Read the first column from a just-written local CSV.
+
+    The heavy data sync functions already write final ordered CSV mirrors
+    before the lightweight lookup tabs are refreshed. Using those local IDs
+    avoids a large immediate read-back from Sheets, which is both slower and
+    prone to Google API 500/timeout responses on busy workbooks.
+    """
+    ids: list[str] = []
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            next(reader, None)  # header
+            for row in reader:
+                item_id = normalize_sheet_value(value_at(row, 0))
+                if item_id:
+                    ids.append(item_id)
+    except OSError as exc:
+        raise RuntimeError(f"{description} failed: {exc}") from exc
+    return ids
+
+
 def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
     if not credentials_path.exists():
         raise SystemExit(
@@ -1988,8 +2010,7 @@ def main() -> int:
     else:
         errors = sync_player_data(spreadsheet, args)
         if not args.skip_players_tab:
-            player_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.worksheet), description=f"Open {args.worksheet} worksheet")
-            playerdata_ids = id_column_values(player_worksheet, "Read final PlayerData IDs")[1:]
+            playerdata_ids = csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
             sync_players_tab(spreadsheet, playerdata_ids)
     if errors:
         safe_print(f"Errors: {args.errors}")
@@ -2002,10 +2023,9 @@ def main() -> int:
     if not args.skip_competitions:
         competition_errors = sync_competitions(spreadsheet, args)
         if not args.skip_leagues_tab:
-            competition_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.competition_worksheet), description=f"Open {args.competition_worksheet} worksheet")
-            competition_ids = id_column_values(
-                competition_worksheet, "Read final CompetitionData IDs"
-            )[1:]
+            competition_ids = csv_id_values(
+                args.competition_csv_output, "Read final CompetitionData IDs from CSV"
+            )
             sync_leagues_tab(spreadsheet, competition_ids)
 
     match_errors: list[tuple[str, str, str]] = []
@@ -2013,8 +2033,7 @@ def main() -> int:
     if not args.skip_matches:
         match_errors, all_matches = sync_matches(spreadsheet, args)
         if not args.skip_matches_tab:
-            match_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.match_worksheet), description=f"Open {args.match_worksheet} worksheet")
-            matchdata_ids = id_column_values(match_worksheet, "Read final MatchData IDs")[1:]
+            matchdata_ids = csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV")
             sync_matches_tab(spreadsheet, matchdata_ids)
         if not args.skip_projection_snapshot:
             snapshot_pre_match_projections(spreadsheet, args)
@@ -2030,8 +2049,7 @@ def main() -> int:
     if not args.skip_clubs:
         club_errors = sync_clubs(spreadsheet, args)
         if not args.skip_club_tab:
-            club_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.club_worksheet), description=f"Open {args.club_worksheet} worksheet")
-            clubdata_ids = id_column_values(club_worksheet, "Read final ClubData IDs")[1:]
+            clubdata_ids = csv_id_values(args.club_csv_output, "Read final ClubData IDs from CSV")
             sync_club_tab(spreadsheet, clubdata_ids)
 
     return (
