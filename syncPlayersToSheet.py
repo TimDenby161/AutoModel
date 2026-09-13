@@ -254,6 +254,11 @@ def parse_args() -> argparse.Namespace:
         help="Don't mirror IDs/formulas into the Leagues tab after syncing CompetitionData",
     )
     parser.add_argument(
+        "--only-leagues-tab",
+        action="store_true",
+        help="Only mirror IDs/formulas into the Leagues tab from the local competition CSV",
+    )
+    parser.add_argument(
         "--club-input",
         type=Path,
         default=folder / "club_ids.txt",
@@ -306,6 +311,11 @@ def parse_args() -> argparse.Namespace:
         help="Don't mirror IDs/formulas into the Matches tab after syncing MatchData",
     )
     parser.add_argument(
+        "--only-matches-tab",
+        action="store_true",
+        help="Only mirror IDs/formulas into the Matches tab from the local match CSV",
+    )
+    parser.add_argument(
         "--skip-projection-snapshot",
         action="store_true",
         help="Don't freeze not-yet-started matches' ProjH/ProjA/HomeScr/AwayScr and win/draw/away win%% into MatchData's Snap* columns",
@@ -355,6 +365,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-club-tab",
         action="store_true",
         help="Don't mirror IDs/formulas into the Club tab after syncing ClubData",
+    )
+    parser.add_argument(
+        "--only-club-tab",
+        action="store_true",
+        help="Only mirror IDs/formulas into the Club tab from the local club CSV",
     )
     return parser.parse_args()
 
@@ -552,23 +567,15 @@ def sync_lookup_tab(
     row's ID up by value (MATCH/XLOOKUP/INDEX), not by position."""
     last_col_index = gspread.utils.a1_to_rowcol(f"{last_formula_column}1")[1]
     worksheet = get_or_create_worksheet(spreadsheet, worksheet_name, last_col_index)
-    existing_ids = sheet_call(
-        lambda: worksheet.col_values(1),
-        description=f"Read {worksheet_name} column A",
-    )
-    existing_count = len(existing_ids[data_start_row - 1 :])
-    existing_last_row = data_start_row - 1 + existing_count
+    existing_last_row = worksheet.row_count
     new_last_row = data_start_row - 1 + len(ids)
 
-    # Base the formula copy-down on how far column B's formulas actually
-    # reach, not on column A's ID count - if a previous run was interrupted
-    # between writing IDs and copying formulas, those two can disagree, and
-    # trusting column A alone would silently leave the gap unfilled forever.
-    existing_formulas = sheet_call(
-        lambda: worksheet.col_values(2),
-        description=f"Read {worksheet_name} column B formulas",
-    )
-    formula_last_row = data_start_row - 1 + len(existing_formulas[data_start_row - 1 :])
+    # Avoid full-column reads here. On this workbook, col_values(A/B) is the
+    # most common transient timeout point after the heavy data sync has
+    # already succeeded. The lookup tabs are maintained with one row per ID,
+    # so the sheet's current row count is enough to know what to clear,
+    # shrink, or copy formulas from.
+    formula_last_row = min(existing_last_row, new_last_row)
 
     if new_last_row > worksheet.row_count:
         sheet_call(
@@ -2024,6 +2031,26 @@ def main() -> int:
         spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
         playerdata_ids = csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
         sync_players_tab(spreadsheet, playerdata_ids)
+        return 0
+
+    if args.only_leagues_tab:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        competition_ids = csv_id_values(
+            args.competition_csv_output, "Read final CompetitionData IDs from CSV"
+        )
+        sync_leagues_tab(spreadsheet, competition_ids)
+        return 0
+
+    if args.only_matches_tab:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        matchdata_ids = csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV")
+        sync_matches_tab(spreadsheet, matchdata_ids)
+        return 0
+
+    if args.only_club_tab:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        clubdata_ids = csv_id_values(args.club_csv_output, "Read final ClubData IDs from CSV")
+        sync_club_tab(spreadsheet, clubdata_ids)
         return 0
 
     spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
