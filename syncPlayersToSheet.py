@@ -173,6 +173,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Don't mirror IDs/formulas into the Players tab after syncing PlayerData",
     )
+    parser.add_argument(
+        "--only-players-tab",
+        action="store_true",
+        help="Only mirror IDs/formulas into the Players tab from the local player CSV",
+    )
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--detail-workers", type=int, default=6)
     parser.add_argument("--request-delay", type=float, default=0.06)
@@ -547,7 +552,11 @@ def sync_lookup_tab(
     row's ID up by value (MATCH/XLOOKUP/INDEX), not by position."""
     last_col_index = gspread.utils.a1_to_rowcol(f"{last_formula_column}1")[1]
     worksheet = get_or_create_worksheet(spreadsheet, worksheet_name, last_col_index)
-    existing_count = len(worksheet.col_values(1)[data_start_row - 1 :])
+    existing_ids = sheet_call(
+        lambda: worksheet.col_values(1),
+        description=f"Read {worksheet_name} column A",
+    )
+    existing_count = len(existing_ids[data_start_row - 1 :])
     existing_last_row = data_start_row - 1 + existing_count
     new_last_row = data_start_row - 1 + len(ids)
 
@@ -555,7 +564,11 @@ def sync_lookup_tab(
     # reach, not on column A's ID count - if a previous run was interrupted
     # between writing IDs and copying formulas, those two can disagree, and
     # trusting column A alone would silently leave the gap unfilled forever.
-    formula_last_row = data_start_row - 1 + len(worksheet.col_values(2)[data_start_row - 1 :])
+    existing_formulas = sheet_call(
+        lambda: worksheet.col_values(2),
+        description=f"Read {worksheet_name} column B formulas",
+    )
+    formula_last_row = data_start_row - 1 + len(existing_formulas[data_start_row - 1 :])
 
     if new_last_row > worksheet.row_count:
         sheet_call(
@@ -612,8 +625,13 @@ def sync_lookup_tab(
         # filter) is hiding any row in range - clear it first. Best-effort:
         # this fails harmlessly if there's no filter to remove.
         try:
-            spreadsheet.batch_update({"requests": [{"clearBasicFilter": {"sheetId": worksheet.id}}]})
-        except gspread.exceptions.APIError:
+            sheet_call(
+                lambda: spreadsheet.batch_update(
+                    {"requests": [{"clearBasicFilter": {"sheetId": worksheet.id}}]}
+                ),
+                description=f"Clear {worksheet_name} basic filter",
+            )
+        except (gspread.exceptions.APIError, RuntimeError):
             pass
 
         copy_request = {
@@ -2000,6 +2018,12 @@ def main() -> int:
     if args.only_individual_results:
         spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
         sync_individual_results(spreadsheet, args)
+        return 0
+
+    if args.only_players_tab:
+        spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
+        playerdata_ids = csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
+        sync_players_tab(spreadsheet, playerdata_ids)
         return 0
 
     spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
