@@ -519,21 +519,56 @@ def sync_lookup_tab(
     data_start_row: int,
     last_formula_column: str,
 ) -> None:
-    """Mirror `ids` into column A of `worksheet_name`, growing the sheet and
-    copying the existing B:<last_formula_column> lookup formulas down for
-    any new rows. Row order doesn't matter - every formula looks its own
-    row's ID up by value (MATCH/XLOOKUP/INDEX), not by position."""
+    """Mirror `ids` into column A of `worksheet_name` - existing rows are
+    NEVER rewritten or reordered, even if `ids` itself comes in a different
+    order than last time (e.g. if the source *Data tab's own row order ever
+    changed). Only genuinely new IDs get appended after the current last
+    row; IDs no longer present get their row cleared in place, leaving a
+    gap rather than shifting anything up. Every formula in this tab looks
+    its own row's ID up by value (MATCH/XLOOKUP/INDEX), not by position, so
+    a gap or a some-other-order-than-the-source costs nothing functionally
+    - only row *position* stability for existing entries matters here."""
     last_col_index = gspread.utils.a1_to_rowcol(f"{last_formula_column}1")[1]
     worksheet = get_or_create_worksheet(spreadsheet, worksheet_name, last_col_index)
-    existing_count = len(worksheet.col_values(1)[data_start_row - 1 :])
-    existing_last_row = data_start_row - 1 + existing_count
-    new_last_row = data_start_row - 1 + len(ids)
 
-    # Base the formula copy-down on how far column B's formulas actually
-    # reach, not on column A's ID count - if a previous run was interrupted
-    # between writing IDs and copying formulas, those two can disagree, and
-    # trusting column A alone would silently leave the gap unfilled forever.
+    existing_ids_raw = worksheet.col_values(1)[data_start_row - 1 :]
+    existing_row_by_id: dict[str, int] = {}
+    for offset, raw in enumerate(existing_ids_raw):
+        text = str(raw).strip()
+        if text:
+            existing_row_by_id[text] = data_start_row + offset
+
+    wanted_ids = {str(item_id) for item_id in ids}
+    new_ids = [item_id for item_id in ids if str(item_id) not in existing_row_by_id]
+    removed_ids = [eid for eid in existing_row_by_id if eid not in wanted_ids]
+
+    # Clear rows for IDs no longer present, in place - a gap, not a
+    # reshuffle. Existing rows must never move.
+    if removed_ids:
+        ranges = [
+            f"A{existing_row_by_id[rid]}:{last_formula_column}{existing_row_by_id[rid]}"
+            for rid in removed_ids
+        ]
+        sheet_call(
+            lambda ranges=ranges: worksheet.batch_clear(ranges),
+            description=f"Clear {worksheet_name} rows for removed IDs",
+        )
+
+    if not new_ids:
+        safe_print(
+            f"{worksheet_name} tab: no new IDs to add "
+            f"({len(removed_ids):,} removed, existing rows untouched)."
+        )
+        return
+
+    # Base the formula copy-down source on how far column B's formulas
+    # actually reach, not on column A's ID count - if a previous run was
+    # interrupted between writing IDs and copying formulas, those two can
+    # disagree, and trusting column A alone would silently leave the gap
+    # unfilled forever.
     formula_last_row = data_start_row - 1 + len(worksheet.col_values(2)[data_start_row - 1 :])
+    last_row_before = data_start_row - 1 + len(existing_ids_raw)
+    new_last_row = last_row_before + len(new_ids)
 
     if new_last_row > worksheet.row_count:
         sheet_call(
@@ -541,48 +576,18 @@ def sync_lookup_tab(
             description=f"Grow {worksheet_name} sheet",
         )
 
-    clear_through = max(existing_last_row, new_last_row)
-    if clear_through >= data_start_row:
-        sheet_call(
-            lambda: worksheet.batch_clear([f"A{data_start_row}:A{clear_through}"]),
-            description=f"Clear {worksheet_name} column A",
-        )
-
-    if ids:
-        # MATCH/XLOOKUP/INDEX in this tab's formula columns do exact-type
-        # matching against the source *Data tab's ID column - both are kept
-        # as plain ints so a RAW write lands as NUMBER on both sides with no
-        # extra formatting pass needed.
-        sheet_call(
-            lambda: worksheet.update(
-                f"A{data_start_row}:A{new_last_row}",
-                [[int(item_id)] for item_id in ids],
-                value_input_option="RAW",
-            ),
-            description=f"Write {worksheet_name} column A",
-        )
-
-    # If the ID list shrank, column A above already blanked the leftover
-    # rows, but their B..last_formula_column cells still hold formulas
-    # keyed off what's now a blank A - left alone they'd just show #N/A
-    # forever instead of being removed.
-    leftover_through = max(existing_last_row, formula_last_row)
-    if leftover_through > new_last_row:
-        sheet_call(
-            lambda: worksheet.batch_clear(
-                [f"B{new_last_row + 1}:{last_formula_column}{leftover_through}"]
-            ),
-            description=f"Clear {worksheet_name} leftover formulas",
-        )
-
-    # If the ID list shrank enough that the sheet's actual row count is now
-    # bigger than it needs to be, shrink it back down - the clears above only
-    # blank cell content, they don't free up the workbook's 10M-cell budget.
-    if worksheet.row_count > new_last_row:
-        sheet_call(
-            lambda: worksheet.resize(rows=new_last_row),
-            description=f"Shrink {worksheet_name} sheet",
-        )
+    # MATCH/XLOOKUP/INDEX in this tab's formula columns do exact-type
+    # matching against the source *Data tab's ID column - both are kept
+    # as plain ints so a RAW write lands as NUMBER on both sides with no
+    # extra formatting pass needed.
+    sheet_call(
+        lambda: worksheet.update(
+            f"A{last_row_before + 1}:A{new_last_row}",
+            [[int(item_id)] for item_id in new_ids],
+            value_input_option="RAW",
+        ),
+        description=f"Append new IDs to {worksheet_name} column A",
+    )
 
     added_rows = new_last_row - formula_last_row
     if added_rows > 0 and formula_last_row >= data_start_row:
@@ -623,7 +628,8 @@ def sync_lookup_tab(
         )
 
     safe_print(
-        f"{worksheet_name} tab: wrote {len(ids):,} IDs to column A, "
+        f"{worksheet_name} tab: appended {len(new_ids):,} new ID(s), "
+        f"cleared {len(removed_ids):,} removed row(s), "
         f"copied formulas into {max(0, added_rows):,} new row(s)."
     )
 
