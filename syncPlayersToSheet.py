@@ -601,10 +601,12 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
     # burning retries on reads that would have succeeded given more time.
     gc.set_timeout((10, 120))
     try:
-        return sheet_call(
+        spreadsheet = sheet_call(
             lambda: gc.open_by_key(spreadsheet_id),
             description=f"Open spreadsheet {spreadsheet_id}",
         )
+        memoize_worksheet_lookups(spreadsheet)
+        return spreadsheet
     except PermissionError as exc:
         raise SystemExit(
             f"Permission denied opening spreadsheet {spreadsheet_id}. Share it with "
@@ -619,11 +621,60 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
         raise
 
 
+def memoize_worksheet_lookups(spreadsheet) -> None:
+    """spreadsheet.worksheet(title) calls fetch_sheet_metadata() - a full
+    metadata dump covering every tab in the spreadsheet (properties,
+    conditional formats, filters, protected ranges, etc. for all of them,
+    though not cell data) - EVERY time it's called, with no caching of its
+    own. This workbook has 230+ tabs, so that dump is large, and this
+    script calls spreadsheet.worksheet() well over a dozen times in a
+    single run (once per tab it manages) - each one paying for a fresh
+    fetch of EVERY tab's metadata just to find the one it wants. That's a
+    major, entirely avoidable source of the repeated timeouts seen even on
+    calls that look "simple" (opening a worksheet, a 1-2 cell spot-check) -
+    they were never actually simple against this specific workbook.
+
+    Patches this spreadsheet instance so the first .worksheet() call (for
+    any title) fetches every tab's metadata ONCE and caches all of them;
+    every later call this run, for any title, is served from memory with
+    no further API call. get_or_create_worksheet also feeds a newly
+    created worksheet straight into this same cache, so creating a tab
+    never forces a second full re-fetch just to "discover" it."""
+    cache: dict[str, Any] = {}
+    spreadsheet._worksheet_cache = cache
+
+    def populate() -> None:
+        metadata = sheet_call(
+            lambda: spreadsheet.fetch_sheet_metadata(),
+            description="Fetch spreadsheet metadata",
+        )
+        for item in metadata.get("sheets", []):
+            title = item["properties"]["title"]
+            # setdefault, not overwrite: a repopulate (triggered by looking
+            # up a title not yet cached, e.g. a genuinely new tab) must
+            # never replace an already-cached Worksheet object - it may
+            # have grown (add_rows/resize) since it was cached, and that
+            # growth only lives on that object, not on the sheet's server
+            # side metadata being re-fetched here.
+            cache.setdefault(title, gspread.Worksheet(spreadsheet, item["properties"], spreadsheet.id, spreadsheet.client))
+
+    def cached_worksheet(title: str):
+        if not cache:
+            populate()
+        if title not in cache:
+            populate()  # could be a tab created after the first snapshot
+        if title not in cache:
+            raise gspread.WorksheetNotFound(title)
+        return cache[title]
+
+    spreadsheet.worksheet = cached_worksheet
+
+
 def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
     try:
-        # worksheet() fetches metadata for the WHOLE spreadsheet (every tab),
-        # not just this one - a heavier call than most, so it needs the same
-        # retry protection as everything else. gspread.WorksheetNotFound
+        # See memoize_worksheet_lookups - after the first call this run,
+        # .worksheet() is served from an in-memory cache and this is no
+        # longer a full-spreadsheet metadata fetch. gspread.WorksheetNotFound
         # isn't caught by sheet_call's except clause, so it still propagates
         # straight through to the fallback below, unretried, as intended.
         return sheet_call(
@@ -631,10 +682,14 @@ def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
             description=f"Open {worksheet_name} worksheet",
         )
     except gspread.WorksheetNotFound:
-        return sheet_call(
+        worksheet = sheet_call(
             lambda: spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols),
             description=f"Create {worksheet_name} worksheet",
         )
+        cache = getattr(spreadsheet, "_worksheet_cache", None)
+        if cache is not None:
+            cache[worksheet_name] = worksheet
+        return worksheet
 
 
 def load_lookup_mirror(path: Path) -> list[str] | None:
