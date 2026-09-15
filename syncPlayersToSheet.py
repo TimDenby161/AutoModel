@@ -91,6 +91,8 @@ except ImportError:
     raise SystemExit(1)
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
 DEFAULT_SPREADSHEET_ID = "1QhBOsdqzvxxLlXD8iJYwqGRaJIswU_6K86nLY88q5us"
 DEFAULT_WORKSHEET = "PlayerData"
 
@@ -103,21 +105,25 @@ PLAYERS_WORKSHEET = "Players"
 PLAYERS_HEADER_ROW = 2  # row 1 is blank, row 2 holds the column labels
 PLAYERS_DATA_START_ROW = 3
 PLAYERS_LAST_FORMULA_COLUMN = "LX"  # every column B..LX looks up PlayerData by ID
+PLAYERS_LOOKUP_MIRROR = SCRIPT_DIR / "lookup_mirror_players.csv"
 
 LEAGUES_WORKSHEET = "Leagues"
 LEAGUES_HEADER_ROW = 1
 LEAGUES_DATA_START_ROW = 2
 LEAGUES_LAST_FORMULA_COLUMN = "G"  # every column B..G looks up CompetitionData by ID
+LEAGUES_LOOKUP_MIRROR = SCRIPT_DIR / "lookup_mirror_leagues.csv"
 
 CLUB_WORKSHEET = "Club"
 CLUB_HEADER_ROW = 1
 CLUB_DATA_START_ROW = 2
 CLUB_LAST_FORMULA_COLUMN = "CP"  # every column B..CP looks up ClubData by ID
+CLUB_LOOKUP_MIRROR = SCRIPT_DIR / "lookup_mirror_club.csv"
 
 MATCHES_WORKSHEET = "Matches"
 MATCHES_HEADER_ROW = 1
 MATCHES_DATA_START_ROW = 2
 MATCHES_LAST_FORMULA_COLUMN = "AZ"  # every column B..AZ looks up/derives from MatchData by ID
+MATCHES_LOOKUP_MIRROR = SCRIPT_DIR / "lookup_mirror_matches.csv"
 
 INDIVIDUAL_RESULTS_SPREADSHEET_ID = "1y2L7pOfIHqBMQCYsMy3g1Cm1iHCl3aR6onIpMWzWa1A"
 INDIVIDUAL_RESULTS_WORKSHEET = "Individual Results"
@@ -595,6 +601,27 @@ def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
         )
 
 
+def load_lookup_mirror(path: Path) -> list[str] | None:
+    """A local, row-position-indexed mirror of a lookup tab's column A (one
+    line per row starting at that tab's data_start_row, blank = a cleared
+    gap) - lets sync_lookup_tab trust this instead of re-reading the whole
+    column from the sheet every run. Returns None if there's no mirror yet
+    (first run), so the caller knows it must bootstrap with a real read."""
+    if not path.exists():
+        return None
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        return [(row[0].strip() if row else "") for row in csv.reader(f)]
+
+
+def save_lookup_mirror(path: Path, ids_by_row: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with temp.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows([[value] for value in ids_by_row])
+    temp.replace(path)
+
+
 def sync_lookup_tab(
     spreadsheet,
     worksheet_name: str,
@@ -602,6 +629,7 @@ def sync_lookup_tab(
     *,
     data_start_row: int,
     last_formula_column: str,
+    mirror_path: Path | None = None,
 ) -> None:
     """Mirror `ids` into column A of `worksheet_name` - existing rows are
     NEVER rewritten or reordered, even if `ids` itself comes in a different
@@ -611,21 +639,64 @@ def sync_lookup_tab(
     gap rather than shifting anything up. Every formula in this tab looks
     its own row's ID up by value (MATCH/XLOOKUP/INDEX), not by position, so
     a gap or a some-other-order-than-the-source costs nothing functionally
-    - only row *position* stability for existing entries matters here."""
+    - only row *position* stability for existing entries matters here.
+
+    `mirror_path`, when given, is a local file remembering this tab's
+    column A from the end of the last run. Since this function guarantees
+    existing rows never move, that mirror should still describe the sheet
+    exactly - so it's trusted in place of a full column read (this
+    workbook's most common transient-timeout point) after one cheap
+    single-cell spot-check confirms nothing's drifted (e.g. a manual edit,
+    or a previous run that wrote to the sheet but crashed before saving the
+    mirror). Any mismatch there falls back to a real read for this run."""
     last_col_index = gspread.utils.a1_to_rowcol(f"{last_formula_column}1")[1]
     worksheet = get_or_create_worksheet(spreadsheet, worksheet_name, last_col_index)
-    # This read of column A is unavoidable - it's what lets existing rows
-    # stay untouched no matter what order `ids` arrives in (see docstring).
-    # It also serves the purpose the old separate column-B read used to:
-    # rather than a second full-column read (col_values() has been this
-    # workbook's most common transient-timeout point after the heavy data
-    # sync already succeeded), approximate the formula frontier from the ID
-    # frontier - this tab is maintained with one row per ID, so formulas
-    # normally track alongside them.
-    existing_ids_raw = sheet_call(
-        lambda: worksheet.col_values(1),
-        description=f"Read {worksheet_name} column A",
-    )[data_start_row - 1 :]
+
+    existing_ids_raw = load_lookup_mirror(mirror_path) if mirror_path else None
+    if existing_ids_raw is not None:
+        # Two things could have drifted since the mirror was last saved: the
+        # sheet's own last row might no longer match it (e.g. a manual edit),
+        # or the sheet might have MORE rows than the mirror knows about (e.g.
+        # a run that appended to the sheet but crashed before saving the
+        # mirror, or the mirror file itself got overwritten by a stale
+        # commit from a git merge between the local machine and CI). One
+        # small range read checks both at once: the mirror's own last row,
+        # plus the row right after it, which must be blank.
+        try:
+            last_row = data_start_row - 1 + len(existing_ids_raw)
+            if existing_ids_raw:
+                rows = sheet_call(
+                    lambda: worksheet.get(f"A{last_row}:A{last_row + 1}", value_render_option="UNFORMATTED_VALUE"),
+                    description=f"Spot-check {worksheet_name} column A",
+                )
+                actual_last = str(rows[0][0]).strip() if rows and rows[0] else ""
+                actual_next = str(rows[1][0]).strip() if len(rows) > 1 and rows[1] else ""
+                mismatch = actual_last != existing_ids_raw[-1] or bool(actual_next)
+            else:
+                rows = sheet_call(
+                    lambda: worksheet.get(f"A{data_start_row}:A{data_start_row}", value_render_option="UNFORMATTED_VALUE"),
+                    description=f"Spot-check {worksheet_name} column A",
+                )
+                mismatch = bool(rows and rows[0] and str(rows[0][0]).strip())
+        except Exception:
+            mismatch = True  # any spot-check trouble - just resync below
+        if mismatch:
+            safe_print(
+                f"{worksheet_name} tab: local mirror doesn't match the sheet "
+                "(spot-check failed) - doing a full column read to resync."
+            )
+            existing_ids_raw = None
+
+    if existing_ids_raw is None:
+        # Either there's no mirror yet, or the spot-check above didn't
+        # confirm it - this read is what lets existing rows stay untouched
+        # no matter what order `ids` arrives in (see docstring), and (once
+        # the mirror is saved below) shouldn't be needed again next run.
+        existing_ids_raw = sheet_call(
+            lambda: worksheet.col_values(1),
+            description=f"Read {worksheet_name} column A",
+        )[data_start_row - 1 :]
+
     existing_row_by_id: dict[str, int] = {}
     for offset, raw in enumerate(existing_ids_raw):
         text = str(raw).strip()
@@ -647,8 +718,13 @@ def sync_lookup_tab(
             lambda ranges=ranges: worksheet.batch_clear(ranges),
             description=f"Clear {worksheet_name} rows for removed IDs",
         )
+        for rid in removed_ids:
+            idx = existing_row_by_id[rid] - data_start_row
+            existing_ids_raw[idx] = ""
 
     if not new_ids:
+        if mirror_path:
+            save_lookup_mirror(mirror_path, existing_ids_raw)
         safe_print(
             f"{worksheet_name} tab: no new IDs to add "
             f"({len(removed_ids):,} removed, existing rows untouched)."
@@ -721,6 +797,9 @@ def sync_lookup_tab(
             description=f"Copy {worksheet_name} formulas down for new rows",
         )
 
+    if mirror_path:
+        save_lookup_mirror(mirror_path, existing_ids_raw + [str(item_id) for item_id in new_ids])
+
     safe_print(
         f"{worksheet_name} tab: appended {len(new_ids):,} new ID(s), "
         f"cleared {len(removed_ids):,} removed row(s), "
@@ -735,6 +814,7 @@ def sync_players_tab(spreadsheet, playerdata_ids: list[str]) -> None:
         playerdata_ids,
         data_start_row=PLAYERS_DATA_START_ROW,
         last_formula_column=PLAYERS_LAST_FORMULA_COLUMN,
+        mirror_path=PLAYERS_LOOKUP_MIRROR,
     )
 
 
@@ -745,6 +825,7 @@ def sync_leagues_tab(spreadsheet, competition_ids: list[str]) -> None:
         competition_ids,
         data_start_row=LEAGUES_DATA_START_ROW,
         last_formula_column=LEAGUES_LAST_FORMULA_COLUMN,
+        mirror_path=LEAGUES_LOOKUP_MIRROR,
     )
 
 
@@ -755,6 +836,7 @@ def sync_club_tab(spreadsheet, clubdata_ids: list[str]) -> None:
         clubdata_ids,
         data_start_row=CLUB_DATA_START_ROW,
         last_formula_column=CLUB_LAST_FORMULA_COLUMN,
+        mirror_path=CLUB_LOOKUP_MIRROR,
     )
 
 
@@ -765,6 +847,7 @@ def sync_matches_tab(spreadsheet, matchdata_ids: list[str]) -> None:
         matchdata_ids,
         data_start_row=MATCHES_DATA_START_ROW,
         last_formula_column=MATCHES_LAST_FORMULA_COLUMN,
+        mirror_path=MATCHES_LOOKUP_MIRROR,
     )
 
 
