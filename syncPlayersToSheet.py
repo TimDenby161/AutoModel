@@ -317,6 +317,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--match-request-delay", type=float, default=0.06)
     parser.add_argument("--match-retries", type=int, default=4)
     parser.add_argument(
+        "--competition-parents-cache",
+        type=Path,
+        default=folder / "competition_parent_ids.json",
+        help=(
+            "Learned Competition ID -> Parent Competition ID map, used to skip "
+            "re-enriching finished matches whose competition is already known to be "
+            "outside --matchdata-competition-input. Default: competition_parent_ids.json"
+        ),
+    )
+    parser.add_argument(
         "--skip-matches",
         action="store_true",
         help="Don't sync the MatchData tab in this run",
@@ -1649,6 +1659,7 @@ def sync_matches(
             "competitions and will be deleted after this run's updates/appends."
         )
 
+    parent_cache = gmatch.load_parent_cache(args.competition_parents_cache)
     matches, errors = gmatch.collect_matches(
         club_ids,
         mode=args.match_mode,
@@ -1661,7 +1672,10 @@ def sync_matches(
         retries=args.match_retries,
         cached=cached,
         cached_all=cached_all,
+        keep_competition_ids=keep_competition_ids,
+        parent_cache=parent_cache,
     )
+    gmatch.save_parent_cache(args.competition_parents_cache, parent_cache)
 
     today_date = datetime.now(timezone.utc).date()
     today = today_date.isoformat()
@@ -2088,6 +2102,7 @@ def main() -> int:
     args.competition_errors = args.competition_errors.resolve()
     args.club_input = args.club_input.resolve()
     args.matchdata_competition_input = args.matchdata_competition_input.resolve()
+    args.competition_parents_cache = args.competition_parents_cache.resolve()
     args.match_csv_output = args.match_csv_output.resolve()
     args.match_errors = args.match_errors.resolve()
     args.club_csv_output = args.club_csv_output.resolve()

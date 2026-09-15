@@ -308,6 +308,43 @@ def write_errors(path: Path, errors: list[tuple[str, str, str]]) -> None:
             w.writerow([kind, item, error, now])
 
 
+def load_parent_cache(path: Path) -> dict[str, str]:
+    """Competition ID -> Parent Competition ID, learned from past
+    matchDetails fetches. A competition's parent never changes, so once
+    learned, a competition can be recognised as out-of-scope forever without
+    ever needing another matchDetails fetch for it."""
+    if not path.exists():
+        return {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): str(v) for k, v in data.items() if v}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_parent_cache(path: Path, cache: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with temp.open("w", encoding="utf-8") as f:
+        json.dump(cache, f, sort_keys=True)
+    temp.replace(path)
+
+
+def confirmed_out_of_scope(
+    competition_id: str, keep_competition_ids: set[str] | None, parent_cache: dict[str, str]
+) -> bool:
+    """True only when we can prove a match can't be in scope without an API
+    call: its own (lightweight-feed) Competition ID isn't in the keep list,
+    AND we've previously learned its Parent Competition ID and that isn't in
+    the keep list either. An unrecognised Competition ID is never confirmed
+    out - it still needs a real fetch to learn its parent."""
+    if not keep_competition_ids or competition_id in keep_competition_ids:
+        return False
+    parent = parent_cache.get(competition_id)
+    return parent is not None and parent not in keep_competition_ids
+
+
 def collect_matches(
     club_ids: list[str],
     *,
@@ -321,6 +358,8 @@ def collect_matches(
     retries: int,
     cached: dict[str, dict[str, Any]],
     cached_all: dict[str, dict[str, Any]],
+    keep_competition_ids: set[str] | None = None,
+    parent_cache: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], list[tuple[str, str, str]]]:
     """Fetch and merge fixtures for every club, enrich completed matches,
     and fill in round info for everything else.
@@ -330,9 +369,18 @@ def collect_matches(
     `cached_all` (every previously-seen Match ID -> row) lets not-yet-final
     matches reuse a previously-fetched round number instead of re-fetching
     just for that. Pass {} for both on a from-scratch run.
+
+    `keep_competition_ids`/`parent_cache`: when given, a match whose
+    Competition ID is confirmed out of the tracked scope (see
+    `confirmed_out_of_scope`) never gets enriched or round-filled at all -
+    it will be dropped by the caller's own scope filter regardless, so
+    fetching its full detail would be pure waste. `parent_cache` is updated
+    in place with every Parent Competition ID learned this run, so the
+    caller can persist it and this recognition compounds across runs.
     """
     errors: list[tuple[str, str, str]] = []
     matches: dict[str, dict[str, Any]] = {}
+    parent_cache = {} if parent_cache is None else parent_cache
     with ThreadPoolExecutor(max_workers=max(1, club_workers)) as pool:
         jobs = {pool.submit(fetch, f"{TEAM_URL}?{urlencode({'id': club_id})}",
                             retries, request_delay): club_id for club_id in club_ids}
@@ -358,8 +406,14 @@ def collect_matches(
                 errors.append(("Club", club_id, str(exc)))
 
     if mode == "full":
-        targets = [m for m in matches.values() if m["Finished"] and not m["Cancelled"]]
-        print(f"Enriching {len(targets)} completed matches; {len(cached)} reusable rows found...")
+        all_finished = [m for m in matches.values() if m["Finished"] and not m["Cancelled"]]
+        targets = [
+            m for m in all_finished
+            if not confirmed_out_of_scope(str(m.get("Competition ID", "")), keep_competition_ids, parent_cache)
+        ]
+        skipped_out_of_scope = len(all_finished) - len(targets)
+        print(f"Enriching {len(targets)} completed matches; {len(cached)} reusable rows found"
+              + (f" ({skipped_out_of_scope} confirmed out of scope, skipped)..." if skipped_out_of_scope else "..."))
         with ThreadPoolExecutor(max_workers=max(1, detail_workers)) as pool:
             jobs = {}
             for row in targets:
@@ -374,13 +428,20 @@ def collect_matches(
                     reused = dict(cached[key])
                     reused["Match ID"] = int(key)
                     matches[key] = reused
+                    comp_id, parent_id = str(reused.get("Competition ID", "")), reused.get("Parent Competition ID")
+                    if comp_id and parent_id:
+                        parent_cache[comp_id] = str(parent_id)
                 else:
                     url = f"{MATCH_URL}?{urlencode({'matchId': key})}"
                     jobs[pool.submit(fetch, url, retries, request_delay)] = (key, row)
             for future in as_completed(jobs):
                 key, row = jobs[future]
                 try:
-                    matches[key] = enrich(row, future.result())
+                    enriched = enrich(row, future.result())
+                    matches[key] = enriched
+                    comp_id, parent_id = str(enriched.get("Competition ID", "")), enriched.get("Parent Competition ID")
+                    if comp_id and parent_id:
+                        parent_cache[comp_id] = str(parent_id)
                 except Exception as exc:
                     errors.append(("Match", key, str(exc)))
 
