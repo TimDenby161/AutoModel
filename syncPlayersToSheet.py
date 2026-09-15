@@ -213,6 +213,16 @@ def parse_args() -> argparse.Namespace:
         help="Rows per Sheets API call (keeps requests small and within quota)",
     )
     parser.add_argument(
+        "--sheets-request-delay",
+        type=float,
+        default=1.0,
+        help=(
+            "Minimum seconds between successive Sheets API calls, spread across every "
+            "read/write this script makes - keeps request rate well under Sheets API "
+            "quotas on a large, heavily-synced spreadsheet (default: 1.0)"
+        ),
+    )
+    parser.add_argument(
         "--manager-input",
         type=Path,
         default=folder / "manager_ids.txt",
@@ -501,9 +511,33 @@ def _reset_active_sessions() -> None:
             pass
 
 
+_SHEETS_RATE_LOCK = threading.Lock()
+_SHEETS_LAST_REQUEST = 0.0
+SHEETS_MIN_REQUEST_INTERVAL = 1.0  # seconds between successive Sheets API calls
+
+
+def _sheets_rate_limit() -> None:
+    """Space out every Sheets API call by at least SHEETS_MIN_REQUEST_INTERVAL.
+    Today's failures span every kind of call this file makes - tiny 1-2 cell
+    reads, huge column reads, medium writes, metadata fetches - with
+    outright APIError [404]/[500]/[502] responses mixed in with timeouts.
+    That pattern doesn't fit any one request being too large; it fits
+    Google throttling/degrading this spreadsheet once too many requests
+    land on it in too short a window. This is the same rate_limit() pattern
+    getMatches.py already uses for FotMob, applied here since sheet_call is
+    the one chokepoint every Sheets API call in this file passes through."""
+    global _SHEETS_LAST_REQUEST
+    with _SHEETS_RATE_LOCK:
+        wait = SHEETS_MIN_REQUEST_INTERVAL - (time.monotonic() - _SHEETS_LAST_REQUEST)
+        if wait > 0:
+            time.sleep(wait)
+        _SHEETS_LAST_REQUEST = time.monotonic()
+
+
 def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", backoff_cap: int = 60):
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
+        _sheets_rate_limit()
         try:
             return fn()
         except (gspread.exceptions.APIError, requests.exceptions.RequestException) as exc:
@@ -2425,6 +2459,8 @@ def sync_player_data(
 
 def main() -> int:
     args = parse_args()
+    global SHEETS_MIN_REQUEST_INTERVAL
+    SHEETS_MIN_REQUEST_INTERVAL = args.sheets_request_delay
     args.input = args.input.resolve()
     args.csv_output = args.csv_output.resolve()
     args.errors = args.errors.resolve()
