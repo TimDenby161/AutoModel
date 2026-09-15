@@ -19,6 +19,7 @@ import csv
 import json
 import random
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -308,6 +309,25 @@ def write_errors(path: Path, errors: list[tuple[str, str, str]]) -> None:
             w.writerow([kind, item, error, now])
 
 
+def progress(prefix: str, done: int, total: int) -> None:
+    """Show that a long as_completed() loop is still alive. In an
+    interactive terminal this redraws one line in place (a real progress
+    bar); redirected to a file/log, it instead prints a plain update every
+    ~5% so the log doesn't fill with carriage-return junk."""
+    if total <= 0:
+        return
+    if sys.stdout.isatty():
+        width = 30
+        filled = width * done // total
+        bar = "#" * filled + "-" * (width - filled)
+        end = "\n" if done == total else ""
+        print(f"\r{prefix} [{bar}] {done}/{total}", end=end, flush=True)
+    else:
+        step = max(1, total // 20)
+        if done == total or done % step == 0:
+            print(f"{prefix}: {done}/{total}", flush=True)
+
+
 def load_parent_cache(path: Path) -> dict[str, str]:
     """Competition ID -> Parent Competition ID, learned from past
     matchDetails fetches. A competition's parent never changes, so once
@@ -384,6 +404,7 @@ def collect_matches(
     with ThreadPoolExecutor(max_workers=max(1, club_workers)) as pool:
         jobs = {pool.submit(fetch, f"{TEAM_URL}?{urlencode({'id': club_id})}",
                             retries, request_delay): club_id for club_id in club_ids}
+        done = 0
         for future in as_completed(jobs):
             club_id = jobs[future]
             try:
@@ -404,6 +425,8 @@ def collect_matches(
                     matches[match_id] = row
             except Exception as exc:
                 errors.append(("Club", club_id, str(exc)))
+            done += 1
+            progress("Fetching club fixtures", done, len(jobs))
 
     if mode == "full":
         all_finished = [m for m in matches.values() if m["Finished"] and not m["Cancelled"]]
@@ -434,6 +457,7 @@ def collect_matches(
                 else:
                     url = f"{MATCH_URL}?{urlencode({'matchId': key})}"
                     jobs[pool.submit(fetch, url, retries, request_delay)] = (key, row)
+            done = 0
             for future in as_completed(jobs):
                 key, row = jobs[future]
                 try:
@@ -444,6 +468,8 @@ def collect_matches(
                         parent_cache[comp_id] = str(parent_id)
                 except Exception as exc:
                     errors.append(("Match", key, str(exc)))
+                done += 1
+                progress("Enriching completed matches", done, len(jobs))
 
         # Round numbers aren't in the lightweight fixtures feed, only in
         # matchDetails - so scheduled/live matches (skipped above) never get
@@ -480,6 +506,7 @@ def collect_matches(
             if round_targets:
                 print(f"Filling round info for {len(round_targets)} other fixtures "
                       f"({reused_rounds} reused, {len(jobs)} to fetch)...")
+            done = 0
             for future in as_completed(jobs):
                 row = jobs[future]
                 try:
@@ -492,6 +519,8 @@ def collect_matches(
                     row["Coverage Level"] = row.get("Coverage Level") or general.get("coverageLevel", "")
                 except Exception as exc:
                     errors.append(("Match", str(row["Match ID"]), str(exc)))
+                done += 1
+                progress("Filling round info", done, len(jobs))
 
     now = datetime.now(timezone.utc).isoformat()
     for row in matches.values():
