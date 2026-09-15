@@ -580,7 +580,10 @@ def sync_lookup_tab(
     # sync already succeeded), approximate the formula frontier from the ID
     # frontier - this tab is maintained with one row per ID, so formulas
     # normally track alongside them.
-    existing_ids_raw = worksheet.col_values(1)[data_start_row - 1 :]
+    existing_ids_raw = sheet_call(
+        lambda: worksheet.col_values(1),
+        description=f"Read {worksheet_name} column A",
+    )[data_start_row - 1 :]
     existing_row_by_id: dict[str, int] = {}
     for offset, raw in enumerate(existing_ids_raw):
         text = str(raw).strip()
