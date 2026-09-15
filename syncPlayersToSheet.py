@@ -482,6 +482,25 @@ def apply_number_ids(row: list[Any], headers: list[str], id_headers: list[str]) 
     return row
 
 
+_ACTIVE_SESSIONS: list[requests.Session] = []
+
+
+def _reset_active_sessions() -> None:
+    """Close every tracked HTTP session's pooled connections. A repeated
+    timeout on otherwise-unremarkable calls (including tiny 1-2 cell reads,
+    which have no size-related reason to be slow) looks less like Google
+    being generally overloaded and more like one specific pooled TCP
+    connection having gone bad - closing it forces the next request to open
+    a fresh connection instead of retrying on the same stuck one. Safe to
+    call anytime: a requests.Session stays fully usable after close(), it
+    just opens new connections as needed."""
+    for session in _ACTIVE_SESSIONS:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", backoff_cap: int = 60):
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -492,6 +511,7 @@ def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", ba
             if attempt < retries:
                 wait = min(2**attempt, backoff_cap)
                 safe_print(f"{description} failed ({exc}); retrying in {wait}s...")
+                _reset_active_sessions()
                 time.sleep(wait)
     raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
 
@@ -600,6 +620,7 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
     # more than 60s on a busy workbook, which was tripping this timeout and
     # burning retries on reads that would have succeeded given more time.
     gc.set_timeout((10, 120))
+    _ACTIVE_SESSIONS.append(gc.http_client.session)
     try:
         spreadsheet = sheet_call(
             lambda: gc.open_by_key(spreadsheet_id),
