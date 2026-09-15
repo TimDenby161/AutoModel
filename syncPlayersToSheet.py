@@ -71,7 +71,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import requests
 
@@ -92,6 +92,7 @@ except ImportError:
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+_T = TypeVar("_T")
 
 DEFAULT_SPREADSHEET_ID = "1QhBOsdqzvxxLlXD8iJYwqGRaJIswU_6K86nLY88q5us"
 DEFAULT_WORKSHEET = "PlayerData"
@@ -2316,6 +2317,22 @@ def main() -> int:
 
     spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
 
+    phase_failures: list[str] = []
+
+    def run_phase(name: str, fn: Callable[[], _T]) -> _T | None:
+        """Run one independent sync phase. A failure here - even one that
+        already exhausted sheet_call's own retries - is logged and this
+        phase is skipped rather than crashing the whole script: one
+        stubborn transient API failure in a single, often low-stakes step
+        (e.g. a lookup tab mirror) used to take down every phase after it
+        too, discarding a whole night's worth of otherwise-successful work."""
+        try:
+            return fn()
+        except Exception as exc:
+            safe_print(f"*** {name} FAILED this run, skipping it: {exc}")
+            phase_failures.append(name)
+            return None
+
     # Matches now syncs before PlayerData (it used to run after) so that,
     # unless --full-player-refresh is passed, sync_player_data can use this
     # run's own fresh results to refresh only players whose club actually
@@ -2323,12 +2340,22 @@ def main() -> int:
     match_errors: list[tuple[str, str, str]] = []
     all_matches: dict[str, dict[str, Any]] | None = None
     if not args.skip_matches:
-        match_errors, all_matches = sync_matches(spreadsheet, args)
+        match_result = run_phase("MatchData sync", lambda: sync_matches(spreadsheet, args))
+        if match_result is not None:
+            match_errors, all_matches = match_result
         if not args.skip_matches_tab:
-            matchdata_ids = csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV")
-            sync_matches_tab(spreadsheet, matchdata_ids)
+            run_phase(
+                "Matches tab sync",
+                lambda: sync_matches_tab(
+                    spreadsheet,
+                    csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV"),
+                ),
+            )
         if not args.skip_projection_snapshot:
-            snapshot_pre_match_projections(spreadsheet, args)
+            run_phase(
+                "Pre-match projection snapshot",
+                lambda: snapshot_pre_match_projections(spreadsheet, args),
+            )
 
     errors: list[tuple[str, str]] = []
     if args.skip_players:
@@ -2344,39 +2371,64 @@ def main() -> int:
                 "No fresh match data this run (matches skipped or none found) - "
                 "refreshing every existing player instead of only recent players."
             )
-        errors = sync_player_data(spreadsheet, args, players_to_refresh=players_to_refresh)
+        errors = run_phase(
+            "PlayerData sync",
+            lambda: sync_player_data(spreadsheet, args, players_to_refresh=players_to_refresh),
+        ) or []
         if not args.skip_players_tab:
-            playerdata_ids = csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
-            sync_players_tab(spreadsheet, playerdata_ids)
+            run_phase(
+                "Players tab sync",
+                lambda: sync_players_tab(
+                    spreadsheet, csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
+                ),
+            )
     if errors:
         safe_print(f"Errors: {args.errors}")
 
     manager_errors: list[tuple[str, str]] = []
     if not args.skip_managers:
-        manager_errors = sync_managers(spreadsheet, args)
+        manager_errors = run_phase("ManagerData sync", lambda: sync_managers(spreadsheet, args)) or []
 
     competition_errors: list[tuple[str, str]] = []
     if not args.skip_competitions:
-        competition_errors = sync_competitions(spreadsheet, args)
+        competition_errors = run_phase(
+            "CompetitionData sync", lambda: sync_competitions(spreadsheet, args)
+        ) or []
         if not args.skip_leagues_tab:
-            competition_ids = csv_id_values(
-                args.competition_csv_output, "Read final CompetitionData IDs from CSV"
+            run_phase(
+                "Leagues tab sync",
+                lambda: sync_leagues_tab(
+                    spreadsheet,
+                    csv_id_values(args.competition_csv_output, "Read final CompetitionData IDs from CSV"),
+                ),
             )
-            sync_leagues_tab(spreadsheet, competition_ids)
 
     if not args.skip_individual_results:
         if all_matches is None:
             safe_print(
                 "Individual Results: MatchData sync was skipped; copying from current sheet values."
             )
-        sync_individual_results(spreadsheet, args, all_matches=all_matches)
+        run_phase(
+            "Individual Results sync",
+            lambda: sync_individual_results(spreadsheet, args, all_matches=all_matches),
+        )
 
     club_errors: list[tuple[str, str]] = []
     if not args.skip_clubs:
-        club_errors = sync_clubs(spreadsheet, args)
+        club_errors = run_phase("ClubData sync", lambda: sync_clubs(spreadsheet, args)) or []
         if not args.skip_club_tab:
-            clubdata_ids = csv_id_values(args.club_csv_output, "Read final ClubData IDs from CSV")
-            sync_club_tab(spreadsheet, clubdata_ids)
+            run_phase(
+                "Club tab sync",
+                lambda: sync_club_tab(
+                    spreadsheet, csv_id_values(args.club_csv_output, "Read final ClubData IDs from CSV")
+                ),
+            )
+
+    if phase_failures:
+        safe_print(
+            f"*** {len(phase_failures)} phase(s) failed this run and were skipped: "
+            f"{', '.join(phase_failures)}. Everything else still completed and was saved."
+        )
 
     return (
         0
@@ -2385,6 +2437,7 @@ def main() -> int:
         and not competition_errors
         and not match_errors
         and not club_errors
+        and not phase_failures
         else 1
     )
 
