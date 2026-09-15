@@ -517,6 +517,31 @@ def id_column_values(worksheet, description: str) -> list[str]:
     )
 
 
+def read_column_a_chunked(worksheet, description: str, chunk_rows: int = 2000) -> list[str]:
+    """Read column A in fixed-size row chunks instead of one `col_values()`
+    request for the whole column. A single very large read has been this
+    workbook's most fragile, timeout-prone call (it kept failing even at a
+    120s read timeout on the "Matches" tab) - several smaller, independently
+    retried requests are each far more likely to succeed quickly even under
+    real Google API strain, and a transient failure only costs a retry of
+    that one chunk rather than the whole column."""
+    total_rows = max(worksheet.row_count, 0)
+    values: list[str] = []
+    row = 1
+    while row <= total_rows:
+        end_row = min(row + chunk_rows - 1, total_rows)
+        chunk = sheet_call(
+            lambda row=row, end_row=end_row: worksheet.get(
+                f"A{row}:A{end_row}", value_render_option="UNFORMATTED_VALUE"
+            ),
+            description=f"{description} (rows {row}-{end_row})",
+        )
+        for i in range(end_row - row + 1):
+            values.append(str(chunk[i][0]).strip() if i < len(chunk) and chunk[i] else "")
+        row = end_row + 1
+    return values
+
+
 def csv_id_values(path: Path, description: str) -> list[str]:
     """Read the first column from a just-written local CSV.
 
@@ -692,9 +717,11 @@ def sync_lookup_tab(
         # confirm it - this read is what lets existing rows stay untouched
         # no matter what order `ids` arrives in (see docstring), and (once
         # the mirror is saved below) shouldn't be needed again next run.
-        existing_ids_raw = sheet_call(
-            lambda: worksheet.col_values(1),
-            description=f"Read {worksheet_name} column A",
+        # Chunked (see read_column_a_chunked) rather than one big col_values()
+        # call, since a single request for the whole column is exactly what's
+        # been timing out even at a 120s read timeout.
+        existing_ids_raw = read_column_a_chunked(
+            worksheet, description=f"Read {worksheet_name} column A"
         )[data_start_row - 1 :]
 
     existing_row_by_id: dict[str, int] = {}
