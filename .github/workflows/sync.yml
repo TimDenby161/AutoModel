@@ -79,6 +79,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -- '*.csv'
+          # A literal (non-glob) pathspec makes `git add` fail outright if the
+          # file doesn't exist yet (e.g. first run, or a --skip-matches
+          # dispatch) - guard it so that doesn't abort the whole step.
+          if [ -f competition_parent_ids.json ]; then
+            git add -- competition_parent_ids.json
+          fi
           git diff --cached --quiet || git commit -m "Automated data sync $(date -u +'%Y-%m-%d %H:%M UTC')"
           for attempt in 1 2 3 4 5; do
             if git push; then
