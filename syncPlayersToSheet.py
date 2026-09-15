@@ -774,8 +774,8 @@ def sync_lookup_tab(
     # extra formatting pass needed.
     sheet_call(
         lambda: worksheet.update(
-            f"A{last_row_before + 1}:A{new_last_row}",
-            [[int(item_id)] for item_id in new_ids],
+            values=[[int(item_id)] for item_id in new_ids],
+            range_name=f"A{last_row_before + 1}:A{new_last_row}",
             value_input_option="RAW",
         ),
         description=f"Append new IDs to {worksheet_name} column A",
@@ -1595,7 +1595,9 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
     if not existing_header or existing_header[0] != SNAPSHOT_HEADERS:
         sheet_call(
             lambda: match_worksheet.update(
-                f"{snap_start_letter}1:{snap_end_letter}1", [SNAPSHOT_HEADERS], value_input_option="RAW"
+                values=[SNAPSHOT_HEADERS],
+                range_name=f"{snap_start_letter}1:{snap_end_letter}1",
+                value_input_option="RAW",
             ),
             description="Write MatchData snapshot header",
         )
