@@ -300,6 +300,21 @@ def load_all_rows(path: Path) -> dict[str, dict[str, Any]]:
         }
 
 
+def save_all_rows(path: Path, matches: dict[str, dict[str, Any]]) -> None:
+    """Write a full CSV mirror of `matches` (any dict keyed by Match ID),
+    same layout as the main output CSV - used for the local round/detail
+    cache, which (unlike the sheet-scoped CSV mirror) also remembers
+    out-of-scope matches so their Round/Competition info never needs
+    re-fetching just because they'll be filtered out downstream."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    with temp.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=HEADERS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(matches.values())
+    temp.replace(path)
+
+
 def write_errors(path: Path, errors: list[tuple[str, str, str]]) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)

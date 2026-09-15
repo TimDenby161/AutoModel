@@ -317,6 +317,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--match-request-delay", type=float, default=0.06)
     parser.add_argument("--match-retries", type=int, default=4)
     parser.add_argument(
+        "--match-local-cache",
+        type=Path,
+        default=folder / "automodel_matches_local_cache.csv",
+        help=(
+            "Local mirror of every match seen this run, in scope or not (unlike "
+            "--match-csv-output, which only mirrors what's kept in the sheet) - lets "
+            "an out-of-scope match's Round/Competition info be reused instead of "
+            "re-fetched every run just because it'll be filtered out afterward. "
+            "Default: automodel_matches_local_cache.csv"
+        ),
+    )
+    parser.add_argument(
         "--competition-parents-cache",
         type=Path,
         default=folder / "competition_parent_ids.json",
@@ -1659,6 +1671,26 @@ def sync_matches(
             "competitions and will be deleted after this run's updates/appends."
         )
 
+    # The sheet only ever holds in-scope matches (out-of-scope rows get
+    # deleted below), so an out-of-scope match's Round/Competition info can
+    # never be reused via existing_values above - it would always look
+    # "never seen" and get re-fetched every run purely to be discarded again.
+    # This local cache remembers every match seen last run regardless of
+    # scope, closing that gap.
+    local_cache = gmatch.load_all_rows(args.match_local_cache)
+    reused_from_local_cache = 0
+    for match_id, row in local_cache.items():
+        if match_id not in cached_all:
+            cached_all[match_id] = row
+            reused_from_local_cache += 1
+        if match_id not in cached and str(row.get("Detailed Data", "")) == "1":
+            cached[match_id] = row
+    if reused_from_local_cache:
+        safe_print(
+            f"MatchData: {reused_from_local_cache:,} additional out-of-scope match(es) "
+            f"reused from the local cache ({args.match_local_cache.name})."
+        )
+
     parent_cache = gmatch.load_parent_cache(args.competition_parents_cache)
     matches, errors = gmatch.collect_matches(
         club_ids,
@@ -1676,6 +1708,17 @@ def sync_matches(
         parent_cache=parent_cache,
     )
     gmatch.save_parent_cache(args.competition_parents_cache, parent_cache)
+
+    # Coalesce this run's results onto the previous local cache (non-blank
+    # new values win, otherwise keep what was already known) so a lighter
+    # --match-mode fixtures run can't blank out previously-learned Round/
+    # detail info for matches it didn't touch. Rebuilt from `matches` only,
+    # so entries for clubs/seasons no longer in scope drop off naturally.
+    merged_local_cache: dict[str, dict[str, Any]] = {}
+    for match_id, row in matches.items():
+        old_row = local_cache.get(match_id, {})
+        merged_local_cache[match_id] = {**old_row, **{k: v for k, v in row.items() if v not in (None, "")}}
+    gmatch.save_all_rows(args.match_local_cache, merged_local_cache)
 
     today_date = datetime.now(timezone.utc).date()
     today = today_date.isoformat()
@@ -2103,6 +2146,7 @@ def main() -> int:
     args.club_input = args.club_input.resolve()
     args.matchdata_competition_input = args.matchdata_competition_input.resolve()
     args.competition_parents_cache = args.competition_parents_cache.resolve()
+    args.match_local_cache = args.match_local_cache.resolve()
     args.match_csv_output = args.match_csv_output.resolve()
     args.match_errors = args.match_errors.resolve()
     args.club_csv_output = args.club_csv_output.resolve()
