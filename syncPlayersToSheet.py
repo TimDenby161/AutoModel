@@ -481,7 +481,7 @@ def apply_number_ids(row: list[Any], headers: list[str], id_headers: list[str]) 
     return row
 
 
-def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", backoff_cap: int = 30):
+def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", backoff_cap: int = 60):
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
