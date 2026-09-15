@@ -553,7 +553,11 @@ def open_spreadsheet(spreadsheet_id: str, credentials_path: Path):
     # retry/backoff logic only ever runs after a request actually raises,
     # so a request that just hangs waiting for a response (no error, no
     # timeout) can't be retried and the whole script sits there indefinitely.
-    gc.set_timeout((10, 60))
+    # 120s (not 60s): a full-column read of a several-thousand-row lookup
+    # tab (e.g. sync_lookup_tab's column A read) has been observed to need
+    # more than 60s on a busy workbook, which was tripping this timeout and
+    # burning retries on reads that would have succeeded given more time.
+    gc.set_timeout((10, 120))
     try:
         return sheet_call(
             lambda: gc.open_by_key(spreadsheet_id),
