@@ -495,6 +495,16 @@ def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", ba
     raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
 
 
+def scaled_batch_size(base_batch_size: int, num_columns: int, *, reference_columns: int = 100) -> int:
+    """Keep each Sheets API batch roughly the same total cell count no
+    matter how wide a tab's rows are. --sheet-batch-size (200 rows) was
+    tuned around tabs like ClubData/MatchData (50-110 columns); PlayerData
+    is ~730 columns wide (17 profile fields plus a 25-field block per
+    season), so the same row count sent several times as many cells per
+    request and was timing out under load."""
+    return max(10, base_batch_size * reference_columns // max(num_columns, 1))
+
+
 def read_existing_values(worksheet, description: str) -> list[list[Any]]:
     """Read a whole sheet with UNFORMATTED_VALUE. The default FORMATTED_VALUE
     returns the cell's *display* text, which for a large enough number can
@@ -2192,10 +2202,15 @@ def sync_player_data(
             safe_print(f"[{done}/{total}] OK ({kind}) {player_id} - {row[1]}")
 
     # Push updates to existing rows first, then append brand-new rows.
+    # PlayerData's ~730 columns are far wider than the other tabs
+    # --sheet-batch-size was tuned for, so its own batches are scaled down
+    # to keep roughly the same total cell count per request (see
+    # scaled_batch_size).
     last_col = column_letters(len(gp.HEADERS))
+    player_batch_size = scaled_batch_size(args.sheet_batch_size, len(gp.HEADERS))
     if updates:
-        for start in range(0, len(updates), args.sheet_batch_size):
-            chunk = updates[start : start + args.sheet_batch_size]
+        for start in range(0, len(updates), player_batch_size):
+            chunk = updates[start : start + player_batch_size]
             body = [
                 {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
                 for row_number, row in chunk
@@ -2209,8 +2224,8 @@ def sync_player_data(
             safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing rows in the sheet")
 
     if appended_rows:
-        for start in range(0, len(appended_rows), args.sheet_batch_size):
-            chunk = appended_rows[start : start + args.sheet_batch_size]
+        for start in range(0, len(appended_rows), player_batch_size):
+            chunk = appended_rows[start : start + player_batch_size]
             sheet_call(
                 lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
                 description=f"Append rows {start + 1}-{start + len(chunk)}",
