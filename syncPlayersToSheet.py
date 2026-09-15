@@ -516,6 +516,91 @@ def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", ba
     raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
 
 
+# Batch writes get fewer retries than the file's general default (8): a
+# batch stuck badly enough to need all of sheet_call's normal retries can
+# burn up to ~19 minutes (8 attempts * up to 120s timeout, plus backoff)
+# before giving up - and until now, that RuntimeError also aborted every
+# later batch in the same loop, so one bad batch could cost an entire
+# tab's worth of updates. write_row_batches/append_row_batches below both
+# fail a stuck batch faster AND skip past it instead of aborting the rest.
+WRITE_BATCH_RETRIES = 4
+
+
+def write_row_batches(
+    updates: list[tuple[int, list[Any]]],
+    batch_size: int,
+    *,
+    worksheet,
+    last_col: str,
+    label: str,
+) -> set[int]:
+    """Write (row_number, row) updates in chunks of `batch_size` via
+    batch_update. A chunk that still fails after WRITE_BATCH_RETRIES
+    attempts is logged and skipped - not retried indefinitely, and not
+    allowed to abort every chunk after it - so a single stuck batch costs
+    only its own rows, not the rest of this tab's update pass. Those rows
+    just keep their current sheet values and get tried again next run.
+    Returns the row numbers that failed to write, so callers can exclude
+    them from any downstream CSV mirror that's meant to match the sheet."""
+    total = len(updates)
+    failed_rows: set[int] = set()
+    for start in range(0, total, batch_size):
+        chunk = updates[start : start + batch_size]
+        body = [
+            {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
+            for row_number, row in chunk
+        ]
+        try:
+            sheet_call(
+                lambda body=body: worksheet.batch_update(
+                    [dict(item) for item in body], value_input_option="RAW"
+                ),
+                description=f"{label} rows {start + 1}-{start + len(chunk)}",
+                retries=WRITE_BATCH_RETRIES,
+            )
+            safe_print(f"{label}: wrote {min(start + len(chunk), total):,}/{total:,} existing rows in the sheet")
+        except RuntimeError as exc:
+            safe_print(
+                f"*** {label} batch {start + 1}-{start + len(chunk)} FAILED after "
+                f"{WRITE_BATCH_RETRIES} attempts, skipping it (will retry next run): {exc}"
+            )
+            failed_rows.update(row_number for row_number, _ in chunk)
+    return failed_rows
+
+
+def append_row_batches(
+    rows: list[list[Any]],
+    batch_size: int,
+    *,
+    worksheet,
+    label: str,
+) -> list[list[Any]]:
+    """Append `rows` in chunks of `batch_size`. A chunk that still fails
+    after WRITE_BATCH_RETRIES attempts is logged and skipped (those rows
+    stay un-appended - they'll look new again next run and get retried
+    then) instead of aborting every chunk after it. Returns only the rows
+    that were actually appended, so callers can keep any downstream CSV
+    mirror in sync with what's really on the sheet."""
+    total = len(rows)
+    appended: list[list[Any]] = []
+    for start in range(0, total, batch_size):
+        chunk = rows[start : start + batch_size]
+        try:
+            sheet_call(
+                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
+                description=f"{label} rows {start + 1}-{start + len(chunk)}",
+                retries=WRITE_BATCH_RETRIES,
+            )
+            appended.extend(chunk)
+            safe_print(f"{label}: appended {min(start + len(chunk), total):,}/{total:,} new rows to the sheet")
+        except RuntimeError as exc:
+            safe_print(
+                f"*** {label} append batch {start + 1}-{start + len(chunk)} FAILED after "
+                f"{WRITE_BATCH_RETRIES} attempts, skipping it (will retry next run): {exc}"
+            )
+    return appended
+
+
 def scaled_batch_size(base_batch_size: int, num_columns: int, *, reference_columns: int = 100) -> int:
     """Keep each Sheets API batch roughly the same total cell count no
     matter how wide a tab's rows are. --sheet-batch-size (200 rows) was
@@ -1443,40 +1528,25 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
             safe_print(f"[{done}/{total}] OK (manager) {manager_id} - {row[1]}")
 
     last_col = column_letters(len(gmgr.HEADERS))
-    if updates:
-        for start in range(0, len(updates), args.sheet_batch_size):
-            chunk = updates[start : start + args.sheet_batch_size]
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in chunk
-            ]
-            sheet_call(
-                # batch_update mutates its input (prefixes "range" with the
-                # worksheet title) - pass fresh copies so a retry after a
-                # transient failure doesn't re-prefix an already-prefixed range.
-                lambda body=body: worksheet.batch_update(
-                    [dict(item) for item in body], value_input_option="RAW"
-                ),
-                description=f"Update manager rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing managers in the sheet")
-
-    if appended_rows:
-        for start in range(0, len(appended_rows), args.sheet_batch_size):
-            chunk = appended_rows[start : start + args.sheet_batch_size]
-            sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"Append manager rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new managers to the sheet")
+    failed_rows = (
+        write_row_batches(updates, args.sheet_batch_size, worksheet=worksheet, last_col=last_col, label="ManagerData")
+        if updates
+        else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, args.sheet_batch_size, worksheet=worksheet, label="ManagerData")
+        if appended_rows
+        else []
+    )
 
     final_by_id: dict[str, list[Any]] = {
         manager_id: list(existing_values[row_number - 1])
         for manager_id, row_number in existing_by_id.items()
     }
     for row_number, row in updates:
-        final_by_id[str(row[manager_id_col])] = row
-    for row in appended_rows:
+        if row_number not in failed_rows:
+            final_by_id[str(row[manager_id_col])] = row
+    for row in appended_ok:
         final_by_id[str(row[manager_id_col])] = row
 
     ordered_ids = [mid for mid in manager_ids if mid in final_by_id]
@@ -1491,8 +1561,9 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
         write_errors(args.manager_errors, errors)
 
     safe_print(
-        f"ManagerData done. {len(appended_rows):,} new managers added, "
-        f"{len(updates):,} existing managers refreshed, {len(errors):,} failed."
+        f"ManagerData done. {len(appended_ok):,}/{len(appended_rows):,} new managers added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} existing managers refreshed, "
+        f"{len(errors):,} fetch failure(s)."
     )
     return errors
 
@@ -1573,37 +1644,25 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
             safe_print(f"[{done}/{total}] OK (competition) {competition_id} - {row[1]}")
 
     last_col = column_letters(len(gcomp.HEADERS))
-    if updates:
-        for start in range(0, len(updates), args.sheet_batch_size):
-            chunk = updates[start : start + args.sheet_batch_size]
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in chunk
-            ]
-            sheet_call(
-                lambda body=body: worksheet.batch_update(
-                    [dict(item) for item in body], value_input_option="RAW"
-                ),
-                description=f"Update competition rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing competitions in the sheet")
-
-    if appended_rows:
-        for start in range(0, len(appended_rows), args.sheet_batch_size):
-            chunk = appended_rows[start : start + args.sheet_batch_size]
-            sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"Append competition rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new competitions to the sheet")
+    failed_rows = (
+        write_row_batches(updates, args.sheet_batch_size, worksheet=worksheet, last_col=last_col, label="CompetitionData")
+        if updates
+        else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, args.sheet_batch_size, worksheet=worksheet, label="CompetitionData")
+        if appended_rows
+        else []
+    )
 
     final_by_id: dict[str, list[Any]] = {
         competition_id: list(existing_values[row_number - 1])
         for competition_id, row_number in existing_by_id.items()
     }
     for row_number, row in updates:
-        final_by_id[str(row[competition_id_col])] = row
-    for row in appended_rows:
+        if row_number not in failed_rows:
+            final_by_id[str(row[competition_id_col])] = row
+    for row in appended_ok:
         final_by_id[str(row[competition_id_col])] = row
 
     ordered_ids = [cid for cid in competition_ids if cid in final_by_id]
@@ -1618,8 +1677,9 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
         write_errors(args.competition_errors, errors)
 
     safe_print(
-        f"CompetitionData done. {len(appended_rows):,} new competitions added, "
-        f"{len(updates):,} existing competitions refreshed, {len(errors):,} failed."
+        f"CompetitionData done. {len(appended_ok):,}/{len(appended_rows):,} new competitions added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} existing competitions refreshed, "
+        f"{len(errors):,} fetch failure(s)."
     )
     return errors
 
@@ -1976,29 +2036,16 @@ def sync_matches(
         safe_print(f"Skipped {skipped_out_of_scope:,} fetched match(es) outside the kept competitions.")
 
     last_col = column_letters(header_len)
-    if updates:
-        for start in range(0, len(updates), args.sheet_batch_size):
-            chunk = updates[start : start + args.sheet_batch_size]
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in chunk
-            ]
-            sheet_call(
-                lambda body=body: worksheet.batch_update(
-                    [dict(item) for item in body], value_input_option="RAW"
-                ),
-                description=f"Update match rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing matches in the sheet")
-
-    if appended_rows:
-        for start in range(0, len(appended_rows), args.sheet_batch_size):
-            chunk = appended_rows[start : start + args.sheet_batch_size]
-            sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"Append match rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new matches to the sheet")
+    failed_rows = (
+        write_row_batches(updates, args.sheet_batch_size, worksheet=worksheet, last_col=last_col, label="MatchData")
+        if updates
+        else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, args.sheet_batch_size, worksheet=worksheet, label="MatchData")
+        if appended_rows
+        else []
+    )
 
     if out_of_scope_rows:
         # Deleted last, using the row numbers captured before this run's
@@ -2019,8 +2066,9 @@ def sync_matches(
         for match_id, row_dict in cached_all.items()
     }
     for row_number, row in updates:
-        final_by_id[str(row[match_id_col])] = row
-    for row in appended_rows:
+        if row_number not in failed_rows:
+            final_by_id[str(row[match_id_col])] = row
+    for row in appended_ok:
         final_by_id[str(row[match_id_col])] = row
 
     all_rows = list(final_by_id.values())
@@ -2036,8 +2084,9 @@ def sync_matches(
         gmatch.write_errors(args.match_errors, errors)
 
     safe_print(
-        f"MatchData done. {len(appended_rows):,} new matches added, "
-        f"{len(updates):,} existing matches refreshed, {len(errors):,} failed."
+        f"MatchData done. {len(appended_ok):,}/{len(appended_rows):,} new matches added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} existing matches refreshed, "
+        f"{len(errors):,} fetch failure(s)."
     )
     return errors, matches
 
@@ -2126,37 +2175,25 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
             safe_print(f"[{done}/{total}] OK (club) {club_id} - {row[1]}")
 
     last_col = column_letters(len(gclub.HEADERS))
-    if updates:
-        for start in range(0, len(updates), args.sheet_batch_size):
-            chunk = updates[start : start + args.sheet_batch_size]
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in chunk
-            ]
-            sheet_call(
-                lambda body=body: worksheet.batch_update(
-                    [dict(item) for item in body], value_input_option="RAW"
-                ),
-                description=f"Update club rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing clubs in the sheet")
-
-    if appended_rows:
-        for start in range(0, len(appended_rows), args.sheet_batch_size):
-            chunk = appended_rows[start : start + args.sheet_batch_size]
-            sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"Append club rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new clubs to the sheet")
+    failed_rows = (
+        write_row_batches(updates, args.sheet_batch_size, worksheet=worksheet, last_col=last_col, label="ClubData")
+        if updates
+        else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, args.sheet_batch_size, worksheet=worksheet, label="ClubData")
+        if appended_rows
+        else []
+    )
 
     final_by_id: dict[str, list[Any]] = {
         club_id: list(existing_values[row_number - 1])
         for club_id, row_number in existing_by_id.items()
     }
     for row_number, row in updates:
-        final_by_id[str(row[club_id_col])] = row
-    for row in appended_rows:
+        if row_number not in failed_rows:
+            final_by_id[str(row[club_id_col])] = row
+    for row in appended_ok:
         final_by_id[str(row[club_id_col])] = row
 
     ordered_ids = [cid for cid in club_ids if cid in final_by_id]
@@ -2172,9 +2209,9 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
 
     not_found_count = len(errors) - len(fatal_errors)
     safe_print(
-        f"ClubData done. {len(appended_rows):,} new clubs added, "
-        f"{len(updates):,} existing clubs refreshed, {len(errors):,} failed "
-        f"({not_found_count:,} permanently gone, {len(fatal_errors):,} unexpected)."
+        f"ClubData done. {len(appended_ok):,}/{len(appended_rows):,} new clubs added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} existing clubs refreshed, "
+        f"{len(errors):,} failed ({not_found_count:,} permanently gone, {len(fatal_errors):,} unexpected)."
     )
     return fatal_errors
 
@@ -2293,38 +2330,30 @@ def sync_player_data(
     # scaled_batch_size).
     last_col = column_letters(len(gp.HEADERS))
     player_batch_size = scaled_batch_size(args.sheet_batch_size, len(gp.HEADERS))
-    if updates:
-        for start in range(0, len(updates), player_batch_size):
-            chunk = updates[start : start + player_batch_size]
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in chunk
-            ]
-            sheet_call(
-                lambda body=body: worksheet.batch_update(
-                    [dict(item) for item in body], value_input_option="RAW"
-                ),
-                description=f"Update rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Updated {min(start + len(chunk), len(updates))}/{len(updates)} existing rows in the sheet")
-
-    if appended_rows:
-        for start in range(0, len(appended_rows), player_batch_size):
-            chunk = appended_rows[start : start + player_batch_size]
-            sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"Append rows {start + 1}-{start + len(chunk)}",
-            )
-            safe_print(f"Appended {min(start + len(chunk), len(appended_rows))}/{len(appended_rows)} new rows to the sheet")
+    failed_rows = (
+        write_row_batches(updates, player_batch_size, worksheet=worksheet, last_col=last_col, label="PlayerData")
+        if updates
+        else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, player_batch_size, worksheet=worksheet, label="PlayerData")
+        if appended_rows
+        else []
+    )
 
     # Rebuild the CSV mirror from the same in-memory dataset (existing rows +
-    # this run's updates/appends) so it always matches the sheet.
+    # this run's updates/appends) so it always matches the sheet - a row
+    # whose write_row_batches call failed keeps its OLD existing_by_id data
+    # here rather than the freshly-fetched-but-never-written value, and a
+    # row from a failed append batch is left out entirely, since neither
+    # ever actually made it onto the sheet.
     final_by_id: dict[str, list[Any]] = {
         player_id: list(row) for player_id, (_, row) in existing_by_id.items()
     }
     for row_number, row in updates:
-        final_by_id[str(row[ID_COL])] = row
-    for row in appended_rows:
+        if row_number not in failed_rows:
+            final_by_id[str(row[ID_COL])] = row
+    for row in appended_ok:
         final_by_id[str(row[ID_COL])] = row
 
     ordered_ids = [pid for pid in player_ids if pid in final_by_id]
@@ -2339,8 +2368,9 @@ def sync_player_data(
         write_errors(args.errors, errors)
 
     safe_print(
-        f"Done. {len(appended_rows):,} new players added, "
-        f"{len(updates):,} existing players refreshed, {len(errors):,} failed."
+        f"Done. {len(appended_ok):,}/{len(appended_rows):,} new players added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} existing players refreshed, "
+        f"{len(errors):,} fetch failure(s)."
     )
     safe_print(f"Sheet: https://docs.google.com/spreadsheets/d/{args.spreadsheet_id}")
     safe_print(f"CSV: {args.csv_output}")
