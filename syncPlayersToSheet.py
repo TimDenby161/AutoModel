@@ -524,6 +524,43 @@ def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", ba
 # tab's worth of updates. write_row_batches/append_row_batches below both
 # fail a stuck batch faster AND skip past it instead of aborting the rest.
 WRITE_BATCH_RETRIES = 4
+# Once a batch has already failed once at full size, further attempts are
+# just checking "does a smaller slice succeed" - a handful of retries
+# already ruled out simple transience at the full size, so each smaller
+# slice needs fewer of its own before deciding to split again.
+SPLIT_BATCH_RETRIES = 2
+
+
+def _write_with_splitting(
+    items: list[Any], write_fn: Callable[[list[Any], int], None], *, label: str, retries: int
+) -> list[Any]:
+    """Try write_fn(items, retries) as one request. If it still fails and
+    there's more than one item, split in half and retry each half
+    independently (with fewer retries each, since the full-size attempt
+    already ruled out simple transience) - a batch that's borderline too
+    large or slow to write as a whole may still succeed in smaller pieces,
+    and a single item that still fails alone is a specific, useful signal
+    (something about that one row's data) rather than being lumped in with
+    its innocent neighbors. Returns whichever items were never
+    successfully written."""
+    try:
+        write_fn(items, retries)
+        return []
+    except RuntimeError as exc:
+        if len(items) == 1:
+            safe_print(
+                f"*** {label}: single item still failed after {retries} attempts even alone, "
+                f"skipping it (will retry next run): {exc}"
+            )
+            return items
+        mid = len(items) // 2
+        safe_print(
+            f"*** {label}: a batch of {len(items)} failed after {retries} attempts - splitting "
+            f"into {mid} + {len(items) - mid} and retrying each half separately..."
+        )
+        failed = _write_with_splitting(items[:mid], write_fn, label=label, retries=SPLIT_BATCH_RETRIES)
+        failed += _write_with_splitting(items[mid:], write_fn, label=label, retries=SPLIT_BATCH_RETRIES)
+        return failed
 
 
 def write_row_batches(
@@ -535,36 +572,42 @@ def write_row_batches(
     label: str,
 ) -> set[int]:
     """Write (row_number, row) updates in chunks of `batch_size` via
-    batch_update. A chunk that still fails after WRITE_BATCH_RETRIES
-    attempts is logged and skipped - not retried indefinitely, and not
-    allowed to abort every chunk after it - so a single stuck batch costs
-    only its own rows, not the rest of this tab's update pass. Those rows
-    just keep their current sheet values and get tried again next run.
-    Returns the row numbers that failed to write, so callers can exclude
-    them from any downstream CSV mirror that's meant to match the sheet."""
+    batch_update, splitting a chunk that fails into progressively smaller
+    pieces (see _write_with_splitting) rather than writing off the whole
+    thing - so one bad row costs only itself, not 26 healthy neighbors.
+    Never allowed to abort later chunks in the same loop either way. Any
+    row that still can't be written even alone keeps its current sheet
+    value and gets tried again next run. The NEXT top-level chunk always
+    starts back at the full `batch_size` regardless of whether this one
+    needed splitting. Returns the row numbers that failed to write, so
+    callers can exclude them from any downstream CSV mirror meant to match
+    the sheet."""
     total = len(updates)
     failed_rows: set[int] = set()
+    written = 0
     for start in range(0, total, batch_size):
         chunk = updates[start : start + batch_size]
-        body = [
-            {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-            for row_number, row in chunk
-        ]
-        try:
+
+        def do_write(items: list[tuple[int, list[Any]]], retries: int) -> None:
+            body = [
+                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
+                for row_number, row in items
+            ]
             sheet_call(
                 lambda body=body: worksheet.batch_update(
                     [dict(item) for item in body], value_input_option="RAW"
                 ),
-                description=f"{label} rows {start + 1}-{start + len(chunk)}",
-                retries=WRITE_BATCH_RETRIES,
+                description=(
+                    f"{label} row {items[0][0]}" if len(items) == 1
+                    else f"{label} rows {items[0][0]}-{items[-1][0]} ({len(items)})"
+                ),
+                retries=retries,
             )
-            safe_print(f"{label}: wrote {min(start + len(chunk), total):,}/{total:,} existing rows in the sheet")
-        except RuntimeError as exc:
-            safe_print(
-                f"*** {label} batch {start + 1}-{start + len(chunk)} FAILED after "
-                f"{WRITE_BATCH_RETRIES} attempts, skipping it (will retry next run): {exc}"
-            )
-            failed_rows.update(row_number for row_number, _ in chunk)
+
+        failed_chunk = _write_with_splitting(chunk, do_write, label=label, retries=WRITE_BATCH_RETRIES)
+        failed_rows.update(row_number for row_number, _ in failed_chunk)
+        written += len(chunk) - len(failed_chunk)
+        safe_print(f"{label}: wrote {written:,}/{total:,} existing rows in the sheet")
     return failed_rows
 
 
@@ -575,29 +618,32 @@ def append_row_batches(
     worksheet,
     label: str,
 ) -> list[list[Any]]:
-    """Append `rows` in chunks of `batch_size`. A chunk that still fails
-    after WRITE_BATCH_RETRIES attempts is logged and skipped (those rows
-    stay un-appended - they'll look new again next run and get retried
-    then) instead of aborting every chunk after it. Returns only the rows
-    that were actually appended, so callers can keep any downstream CSV
-    mirror in sync with what's really on the sheet."""
+    """Append `rows` in chunks of `batch_size`, splitting a chunk that
+    fails into progressively smaller pieces (see _write_with_splitting)
+    rather than leaving the whole thing un-appended. Any row that still
+    can't be appended even alone stays un-appended - it'll look new again
+    next run and get retried then. The NEXT top-level chunk always starts
+    back at the full `batch_size`. Returns only the rows that were
+    actually appended, so callers can keep any downstream CSV mirror in
+    sync with what's really on the sheet."""
     total = len(rows)
     appended: list[list[Any]] = []
+    written = 0
     for start in range(0, total, batch_size):
         chunk = rows[start : start + batch_size]
-        try:
+
+        def do_append(items: list[list[Any]], retries: int) -> None:
             sheet_call(
-                lambda chunk=chunk: worksheet.append_rows(chunk, value_input_option="RAW"),
-                description=f"{label} rows {start + 1}-{start + len(chunk)}",
-                retries=WRITE_BATCH_RETRIES,
+                lambda items=items: worksheet.append_rows(items, value_input_option="RAW"),
+                description=f"{label} append {len(items)} row(s)",
+                retries=retries,
             )
-            appended.extend(chunk)
-            safe_print(f"{label}: appended {min(start + len(chunk), total):,}/{total:,} new rows to the sheet")
-        except RuntimeError as exc:
-            safe_print(
-                f"*** {label} append batch {start + 1}-{start + len(chunk)} FAILED after "
-                f"{WRITE_BATCH_RETRIES} attempts, skipping it (will retry next run): {exc}"
-            )
+
+        failed_chunk = _write_with_splitting(chunk, do_append, label=label, retries=WRITE_BATCH_RETRIES)
+        failed_ids = {id(item) for item in failed_chunk}
+        appended.extend(row for row in chunk if id(row) not in failed_ids)
+        written += len(chunk) - len(failed_chunk)
+        safe_print(f"{label}: appended {written:,}/{total:,} new rows to the sheet")
     return appended
 
 
