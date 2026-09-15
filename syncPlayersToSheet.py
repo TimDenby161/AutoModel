@@ -617,6 +617,44 @@ def _write_with_splitting(
         return failed
 
 
+def diff_row_ranges(row_number: int, old_row: list[Any], new_row: list[Any]) -> list[dict[str, Any]]:
+    """Compare old_row (what's currently on the sheet) against new_row
+    (freshly fetched) column by column, and return only the cells that
+    actually changed, grouped into maximal contiguous column runs - one
+    {range, values} entry per run - instead of the whole row. A refresh
+    that only really changes a handful of fields (e.g. current-season
+    stats plus a couple of profile fields, PlayerData's normal "existing
+    player" case) then writes just those columns rather than all ~730.
+    Values are compared with normalize_sheet_value so a number stored as
+    the sheet's own string "5" isn't treated as different from a freshly
+    fetched 5. Returns [] if nothing actually changed - nothing to write
+    at all for that row."""
+    ranges: list[dict[str, Any]] = []
+    run_start: int | None = None
+    run_values: list[Any] = []
+
+    def flush(end_idx: int) -> None:
+        if run_start is None:
+            return
+        start_letter = column_letters(run_start + 1)
+        end_letter = column_letters(end_idx)
+        ranges.append({"range": f"{start_letter}{row_number}:{end_letter}{row_number}", "values": [run_values]})
+
+    for col_idx in range(max(len(old_row), len(new_row))):
+        old_val = old_row[col_idx] if col_idx < len(old_row) else ""
+        new_val = new_row[col_idx] if col_idx < len(new_row) else ""
+        if normalize_sheet_value(old_val) == normalize_sheet_value(new_val):
+            flush(col_idx)
+            run_start, run_values = None, []
+            continue
+        if run_start is None:
+            run_start = col_idx
+            run_values = []
+        run_values.append(new_val)
+    flush(len(new_row))
+    return ranges
+
+
 def write_row_batches(
     updates: list[tuple[int, list[Any]]],
     batch_size: int,
@@ -624,6 +662,7 @@ def write_row_batches(
     worksheet,
     last_col: str,
     label: str,
+    old_rows: dict[int, list[Any]] | None = None,
 ) -> set[int]:
     """Write (row_number, row) updates in chunks of `batch_size` via
     batch_update, splitting a chunk that fails into progressively smaller
@@ -635,18 +674,42 @@ def write_row_batches(
     starts back at the full `batch_size` regardless of whether this one
     needed splitting. Returns the row numbers that failed to write, so
     callers can exclude them from any downstream CSV mirror meant to match
-    the sheet."""
-    total = len(updates)
+    the sheet.
+
+    `old_rows` (row_number -> the sheet's current row), when given, lets
+    each row write only the columns that actually changed (diff_row_ranges)
+    instead of the whole row - a row with no real changes at all costs no
+    API call whatsoever. Without it (or for a row_number missing from
+    old_rows), the full row is written, same as before."""
+    if old_rows is not None:
+        to_write: list[tuple[int, list[dict[str, Any]]]] = []
+        unchanged = 0
+        for row_number, row in updates:
+            old_row = old_rows.get(row_number)
+            ranges = (
+                diff_row_ranges(row_number, old_row, row) if old_row is not None
+                else [{"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}]
+            )
+            if ranges:
+                to_write.append((row_number, ranges))
+            else:
+                unchanged += 1
+        if unchanged:
+            safe_print(f"{label}: {unchanged:,}/{len(updates):,} row(s) unchanged, nothing to write for them")
+    else:
+        to_write = [
+            (row_number, [{"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}])
+            for row_number, row in updates
+        ]
+
+    total = len(to_write)
     failed_rows: set[int] = set()
     written = 0
     for start in range(0, total, batch_size):
-        chunk = updates[start : start + batch_size]
+        chunk = to_write[start : start + batch_size]
 
-        def do_write(items: list[tuple[int, list[Any]]], retries: int) -> None:
-            body = [
-                {"range": f"A{row_number}:{last_col}{row_number}", "values": [row]}
-                for row_number, row in items
-            ]
+        def do_write(items: list[tuple[int, list[dict[str, Any]]]], retries: int) -> None:
+            body = [entry for _, ranges in items for entry in ranges]
             sheet_call(
                 lambda body=body: worksheet.batch_update(
                     [dict(item) for item in body], value_input_option="RAW"
@@ -661,7 +724,7 @@ def write_row_batches(
         failed_chunk = _write_with_splitting(chunk, do_write, label=label, retries=WRITE_BATCH_RETRIES)
         failed_rows.update(row_number for row_number, _ in failed_chunk)
         written += len(chunk) - len(failed_chunk)
-        safe_print(f"{label}: wrote {written:,}/{total:,} existing rows in the sheet")
+        safe_print(f"{label}: wrote {written:,}/{total:,} changed row(s) in the sheet")
     return failed_rows
 
 
@@ -2434,8 +2497,17 @@ def sync_player_data(
     # scaled_batch_size).
     last_col = column_letters(len(gp.HEADERS))
     player_batch_size = scaled_batch_size(args.sheet_batch_size, len(gp.HEADERS))
+    # PlayerData rows are read back as strings from the sheet - diffed
+    # against the freshly fetched row (ints/floats/etc.) via
+    # normalize_sheet_value inside diff_row_ranges, so a value that hasn't
+    # actually changed doesn't get miscounted as different just because of
+    # its Python type.
+    old_rows_by_row_number = {row_number: old_row for row_number, old_row in existing_by_id.values()}
     failed_rows = (
-        write_row_batches(updates, player_batch_size, worksheet=worksheet, last_col=last_col, label="PlayerData")
+        write_row_batches(
+            updates, player_batch_size, worksheet=worksheet, last_col=last_col, label="PlayerData",
+            old_rows=old_rows_by_row_number,
+        )
         if updates
         else set()
     )
