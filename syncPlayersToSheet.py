@@ -585,8 +585,24 @@ WRITE_BATCH_RETRIES = 3
 SPLIT_BATCH_RETRIES = 1
 
 
+# Hard ceiling on how long ANY single top-level batch is allowed to spend
+# splitting and retrying, no matter how deep it goes or how uniformly
+# broken it turns out to be. Without this, a batch where every single row
+# independently fails could theoretically cascade all the way down to
+# one-row pieces and take hours (each of up to ~27 individual rows paying
+# its own ~120s timeout). With it, once the clock runs out, everything
+# still unresolved in this batch is skipped immediately - a hard
+# guarantee, not just "usually fast."
+MAX_BATCH_SECONDS = 600
+
+
 def _write_with_splitting(
-    items: list[Any], write_fn: Callable[[list[Any], int], None], *, label: str, retries: int
+    items: list[Any],
+    write_fn: Callable[[list[Any], int], None],
+    *,
+    label: str,
+    retries: int,
+    deadline: float,
 ) -> list[Any]:
     """Try write_fn(items, retries) as one request. If it still fails and
     there's more than one item, split in half and retry each half
@@ -595,8 +611,16 @@ def _write_with_splitting(
     large or slow to write as a whole may still succeed in smaller pieces,
     and a single item that still fails alone is a specific, useful signal
     (something about that one row's data) rather than being lumped in with
-    its innocent neighbors. Returns whichever items were never
-    successfully written."""
+    its innocent neighbors. `deadline` (a time.monotonic() timestamp) caps
+    the total time this can spend recursing - once it's passed, whatever's
+    left is skipped immediately rather than splitting further. Returns
+    whichever items were never successfully written."""
+    if time.monotonic() > deadline:
+        safe_print(
+            f"*** {label}: giving up on the remaining {len(items)} item(s) in this batch - "
+            f"{MAX_BATCH_SECONDS}s time budget for it is used up, skipping (will retry next run)"
+        )
+        return list(items)
     try:
         write_fn(items, retries)
         return []
@@ -612,8 +636,8 @@ def _write_with_splitting(
             f"*** {label}: a batch of {len(items)} failed after {retries} attempts - splitting "
             f"into {mid} + {len(items) - mid} and retrying each half separately..."
         )
-        failed = _write_with_splitting(items[:mid], write_fn, label=label, retries=SPLIT_BATCH_RETRIES)
-        failed += _write_with_splitting(items[mid:], write_fn, label=label, retries=SPLIT_BATCH_RETRIES)
+        failed = _write_with_splitting(items[:mid], write_fn, label=label, retries=SPLIT_BATCH_RETRIES, deadline=deadline)
+        failed += _write_with_splitting(items[mid:], write_fn, label=label, retries=SPLIT_BATCH_RETRIES, deadline=deadline)
         return failed
 
 
@@ -721,7 +745,10 @@ def write_row_batches(
                 retries=retries,
             )
 
-        failed_chunk = _write_with_splitting(chunk, do_write, label=label, retries=WRITE_BATCH_RETRIES)
+        failed_chunk = _write_with_splitting(
+            chunk, do_write, label=label, retries=WRITE_BATCH_RETRIES,
+            deadline=time.monotonic() + MAX_BATCH_SECONDS,
+        )
         failed_rows.update(row_number for row_number, _ in failed_chunk)
         written += len(chunk) - len(failed_chunk)
         safe_print(f"{label}: wrote {written:,}/{total:,} changed row(s) in the sheet")
@@ -756,7 +783,10 @@ def append_row_batches(
                 retries=retries,
             )
 
-        failed_chunk = _write_with_splitting(chunk, do_append, label=label, retries=WRITE_BATCH_RETRIES)
+        failed_chunk = _write_with_splitting(
+            chunk, do_append, label=label, retries=WRITE_BATCH_RETRIES,
+            deadline=time.monotonic() + MAX_BATCH_SECONDS,
+        )
         failed_ids = {id(item) for item in failed_chunk}
         appended.extend(row for row in chunk if id(row) not in failed_ids)
         written += len(chunk) - len(failed_chunk)
