@@ -1727,7 +1727,15 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
         for start in range(0, len(updates), args.sheet_batch_size):
             chunk = updates[start : start + args.sheet_batch_size]
             sheet_call(
-                lambda chunk=chunk: match_worksheet.batch_update(chunk, value_input_option="RAW"),
+                # batch_update mutates its input (prefixes "range" with the
+                # worksheet title) - pass fresh copies so a retry after a
+                # transient failure doesn't re-prefix an already-prefixed
+                # range (this is what turned into the "'MatchData'!'MatchData'!
+                # ..." 400 errors: each retry re-wrapped the previous
+                # attempt's already-qualified range).
+                lambda chunk=chunk: match_worksheet.batch_update(
+                    [dict(item) for item in chunk], value_input_option="RAW"
+                ),
                 description=f"Write pre-match snapshots {start + 1}-{start + len(chunk)}",
             )
     safe_print(f"Snapshot: captured pre-match projections for {len(updates):,} not-yet-started match(es).")
