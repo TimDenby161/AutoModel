@@ -178,6 +178,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only mirror IDs/formulas into the Players tab from the local player CSV",
     )
+    parser.add_argument(
+        "--full-player-refresh",
+        action="store_true",
+        help=(
+            "Refresh every existing player every run (the old default). Without this, "
+            "only players whose club played a match in the last "
+            "--player-refresh-window-hours get refreshed - new players are always "
+            "fetched in full regardless."
+        ),
+    )
+    parser.add_argument(
+        "--player-refresh-window-hours",
+        type=float,
+        default=36,
+        help="How far back a finished match still counts as 'recent enough' to refresh its players (default: 36)",
+    )
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--detail-workers", type=int, default=6)
     parser.add_argument("--request-delay", type=float, default=0.06)
@@ -1895,7 +1911,42 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
     return fatal_errors
 
 
-def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
+def players_who_played_recently(
+    all_matches: dict[str, dict[str, Any]] | None, window_hours: float
+) -> set[str] | None:
+    """Player IDs who appeared (started or were an available substitute) in
+    a finished match within the last `window_hours`. Returns None if there's
+    no fresh match data to work from (e.g. --skip-matches this run), so
+    callers can fall back to refreshing everyone rather than silently
+    refreshing nobody."""
+    if not all_matches:
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    players: set[str] = set()
+    for row in all_matches.values():
+        if str(row.get("Finished", "")) != "1":
+            continue
+        match_utc = str(row.get("Match UTC", ""))
+        try:
+            match_dt = datetime.fromisoformat(match_utc.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if match_dt < cutoff:
+            continue
+        for field in (
+            "Home Starter IDs",
+            "Away Starter IDs",
+            "Home Substitute IDs",
+            "Away Substitute IDs",
+        ):
+            ids_str = str(row.get(field, "") or "")
+            players.update(pid for pid in ids_str.split("|") if pid)
+    return players
+
+
+def sync_player_data(
+    spreadsheet, args: argparse.Namespace, players_to_refresh: set[str] | None = None
+) -> list[tuple[str, str]]:
     player_ids = gp.load_player_ids(args.input)
     safe_print(f"Loaded {len(player_ids):,} player IDs from {args.input}")
 
@@ -1923,7 +1974,16 @@ def sync_player_data(spreadsheet, args: argparse.Namespace) -> list[tuple[str, s
 
     new_ids = [pid for pid in player_ids if pid not in existing_by_id]
     existing_ids = [pid for pid in player_ids if pid in existing_by_id]
-    safe_print(f"New players: {len(new_ids):,}; existing players to refresh: {len(existing_ids):,}")
+    if players_to_refresh is not None:
+        skipped = [pid for pid in existing_ids if pid not in players_to_refresh]
+        existing_ids = [pid for pid in existing_ids if pid in players_to_refresh]
+        safe_print(
+            f"New players: {len(new_ids):,}; existing players refreshed (played "
+            f"recently): {len(existing_ids):,}; existing players left untouched: "
+            f"{len(skipped):,}."
+        )
+    else:
+        safe_print(f"New players: {len(new_ids):,}; existing players to refresh: {len(existing_ids):,}")
 
     appended_rows: list[list[Any]] = []
     updates: list[tuple[int, list[Any]]] = []
@@ -2065,12 +2125,36 @@ def main() -> int:
         return 0
 
     spreadsheet = open_spreadsheet(args.spreadsheet_id, args.credentials)
-    errors: list[tuple[str, str]] = []
 
+    # Matches now syncs before PlayerData (it used to run after) so that,
+    # unless --full-player-refresh is passed, sync_player_data can use this
+    # run's own fresh results to refresh only players whose club actually
+    # played recently, instead of refetching every player every night.
+    match_errors: list[tuple[str, str, str]] = []
+    all_matches: dict[str, dict[str, Any]] | None = None
+    if not args.skip_matches:
+        match_errors, all_matches = sync_matches(spreadsheet, args)
+        if not args.skip_matches_tab:
+            matchdata_ids = csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV")
+            sync_matches_tab(spreadsheet, matchdata_ids)
+        if not args.skip_projection_snapshot:
+            snapshot_pre_match_projections(spreadsheet, args)
+
+    errors: list[tuple[str, str]] = []
     if args.skip_players:
         safe_print("Skipping PlayerData sync.")
     else:
-        errors = sync_player_data(spreadsheet, args)
+        players_to_refresh = (
+            None
+            if args.full_player_refresh
+            else players_who_played_recently(all_matches, args.player_refresh_window_hours)
+        )
+        if players_to_refresh is None and not args.full_player_refresh:
+            safe_print(
+                "No fresh match data this run (matches skipped or none found) - "
+                "refreshing every existing player instead of only recent players."
+            )
+        errors = sync_player_data(spreadsheet, args, players_to_refresh=players_to_refresh)
         if not args.skip_players_tab:
             playerdata_ids = csv_id_values(args.csv_output, "Read final PlayerData IDs from CSV")
             sync_players_tab(spreadsheet, playerdata_ids)
@@ -2089,16 +2173,6 @@ def main() -> int:
                 args.competition_csv_output, "Read final CompetitionData IDs from CSV"
             )
             sync_leagues_tab(spreadsheet, competition_ids)
-
-    match_errors: list[tuple[str, str, str]] = []
-    all_matches: dict[str, dict[str, Any]] | None = None
-    if not args.skip_matches:
-        match_errors, all_matches = sync_matches(spreadsheet, args)
-        if not args.skip_matches_tab:
-            matchdata_ids = csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV")
-            sync_matches_tab(spreadsheet, matchdata_ids)
-        if not args.skip_projection_snapshot:
-            snapshot_pre_match_projections(spreadsheet, args)
 
     if not args.skip_individual_results:
         if all_matches is None:
