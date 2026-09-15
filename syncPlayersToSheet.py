@@ -534,35 +534,55 @@ def _sheets_rate_limit() -> None:
         _SHEETS_LAST_REQUEST = time.monotonic()
 
 
-def sheet_call(fn, *, retries: int = 8, description: str = "Sheets API call", backoff_cap: int = 60):
+def _describe_exception(exc: Exception) -> str:
+    """A richer failure description than str(exc) alone. gspread's own
+    APIError.__str__ drops the "status" field Google actually returns
+    (e.g. "UNAVAILABLE", "RESOURCE_EXHAUSTED", "INTERNAL", "NOT_FOUND") -
+    that's the single clearest signal for telling a quota problem apart
+    from a malformed request apart from a plain server hiccup, so surface
+    it explicitly instead of just the numeric code and message."""
+    if isinstance(exc, gspread.exceptions.APIError):
+        status = exc.error.get("status", "?")
+        message = exc.error.get("message", "")
+        return f"APIError [{exc.code} {status}]: {message}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def sheet_call(fn, *, retries: int = 5, description: str = "Sheets API call", backoff_cap: int = 30):
     last_error: Exception | None = None
+    started = time.monotonic()
     for attempt in range(1, retries + 1):
         _sheets_rate_limit()
         try:
             return fn()
         except (gspread.exceptions.APIError, requests.exceptions.RequestException) as exc:
             last_error = exc
+            detail = _describe_exception(exc)
             if attempt < retries:
                 wait = min(2**attempt, backoff_cap)
-                safe_print(f"{description} failed ({exc}); retrying in {wait}s...")
+                safe_print(f"{description} failed (attempt {attempt}/{retries}): {detail}; retrying in {wait}s...")
                 _reset_active_sessions()
                 time.sleep(wait)
-    raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
+    elapsed = time.monotonic() - started
+    raise RuntimeError(
+        f"{description} failed after {retries} attempts over {elapsed:.0f}s: {_describe_exception(last_error)}"
+    )
 
 
-# Batch writes get fewer retries than the file's general default (8): a
-# batch stuck badly enough to need all of sheet_call's normal retries can
-# burn up to ~19 minutes (8 attempts * up to 120s timeout, plus backoff)
-# before giving up - and until now, that RuntimeError also aborted every
-# later batch in the same loop, so one bad batch could cost an entire
-# tab's worth of updates. write_row_batches/append_row_batches below both
-# fail a stuck batch faster AND skip past it instead of aborting the rest.
-WRITE_BATCH_RETRIES = 4
+# Batch writes get fewer retries than the file's general default: a batch
+# stuck badly enough to need every one of sheet_call's normal retries
+# burns real minutes before giving up - and until the fix below, that
+# RuntimeError also aborted every later batch in the same loop, so one bad
+# batch could cost an entire tab's worth of updates. write_row_batches/
+# append_row_batches both fail a stuck batch faster AND skip past it
+# instead of aborting the rest.
+WRITE_BATCH_RETRIES = 3
 # Once a batch has already failed once at full size, further attempts are
 # just checking "does a smaller slice succeed" - a handful of retries
 # already ruled out simple transience at the full size, so each smaller
-# slice needs fewer of its own before deciding to split again.
-SPLIT_BATCH_RETRIES = 2
+# slice gets only one attempt before deciding to split again (no backoff
+# wait at that point either - it either works or it doesn't).
+SPLIT_BATCH_RETRIES = 1
 
 
 def _write_with_splitting(
@@ -1599,13 +1619,14 @@ def sync_managers(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]
                 row = apply_number_ids(future.result(), gmgr.HEADERS, manager_id_headers)
             except Exception as exc:
                 errors.append((manager_id, str(exc)))
-                safe_print(f"[{done}/{total}] ERROR (manager) {manager_id}: {exc}")
+                safe_print(f"ERROR (manager) {manager_id}: {exc}")
+                gmatch.progress("Fetching managers", done, total)
                 continue
             if manager_id in existing_by_id:
                 updates.append((existing_by_id[manager_id], row))
             else:
                 appended_rows.append(row)
-            safe_print(f"[{done}/{total}] OK (manager) {manager_id} - {row[1]}")
+            gmatch.progress("Fetching managers", done, total)
 
     last_col = column_letters(len(gmgr.HEADERS))
     failed_rows = (
@@ -1715,13 +1736,14 @@ def sync_competitions(spreadsheet, args: argparse.Namespace) -> list[tuple[str, 
                 row = apply_number_ids(future.result(), gcomp.HEADERS, competition_id_headers)
             except Exception as exc:
                 errors.append((competition_id, str(exc)))
-                safe_print(f"[{done}/{total}] ERROR (competition) {competition_id}: {exc}")
+                safe_print(f"ERROR (competition) {competition_id}: {exc}")
+                gmatch.progress("Fetching competitions", done, total)
                 continue
             if competition_id in existing_by_id:
                 updates.append((existing_by_id[competition_id], row))
             else:
                 appended_rows.append(row)
-            safe_print(f"[{done}/{total}] OK (competition) {competition_id} - {row[1]}")
+            gmatch.progress("Fetching competitions", done, total)
 
     last_col = column_letters(len(gcomp.HEADERS))
     failed_rows = (
@@ -2246,13 +2268,14 @@ def sync_clubs(spreadsheet, args: argparse.Namespace) -> list[tuple[str, str]]:
                 # fail the whole run the way an unexpected error should.
                 if not isinstance(exc, gclub.ClubNotFoundError):
                     fatal_errors.append((club_id, str(exc)))
-                safe_print(f"[{done}/{total}] ERROR (club) {club_id}: {exc}")
+                safe_print(f"ERROR (club) {club_id}: {exc}")
+                gmatch.progress("Fetching clubs", done, total)
                 continue
             if club_id in existing_by_id:
                 updates.append((existing_by_id[club_id], row))
             else:
                 appended_rows.append(row)
-            safe_print(f"[{done}/{total}] OK (club) {club_id} - {row[1]}")
+            gmatch.progress("Fetching clubs", done, total)
 
     last_col = column_letters(len(gclub.HEADERS))
     failed_rows = (
@@ -2394,14 +2417,15 @@ def sync_player_data(
                 row = apply_number_ids(future.result(), gp.HEADERS, player_id_headers)
             except Exception as exc:
                 errors.append((player_id, str(exc)))
-                safe_print(f"[{done}/{total}] ERROR ({kind}) {player_id}: {exc}")
+                safe_print(f"ERROR ({kind}) {player_id}: {exc}")
+                gmatch.progress("Fetching players", done, total)
                 continue
             if kind == "new":
                 appended_rows.append(row)
             else:
                 row_number, _ = existing_by_id[player_id]
                 updates.append((row_number, row))
-            safe_print(f"[{done}/{total}] OK ({kind}) {player_id} - {row[1]}")
+            gmatch.progress("Fetching players", done, total)
 
     # Push updates to existing rows first, then append brand-new rows.
     # PlayerData's ~730 columns are far wider than the other tabs
