@@ -763,6 +763,7 @@
     <button role="tab" data-tab="fixtures" aria-selected="true">Matches</button>
     <button role="tab" data-tab="table" aria-selected="false">Table</button>
     <button role="tab" data-tab="stats" aria-selected="false">Stats</button>
+    <button role="tab" data-tab="bet" aria-selected="false">Bet</button>
     <button role="tab" data-tab="fpl" aria-selected="false">FPL</button>
     <button role="tab" data-tab="ai-fpl" aria-selected="false">AI FPL</button>
   </nav>
@@ -843,6 +844,15 @@
     <div id="stats-summary" class="stats-summary-grid"></div>
     <p id="stats-note" class="stats-note"></p>
     <div id="stats-counts" class="stats-count-grid"></div>
+  </section>
+
+  <section class="panel" data-tab="bet">
+    <div class="filter-row" id="bet-view-filters">
+      <button type="button" class="filter-chip" data-view="upcoming" aria-pressed="true">Upcoming Picks</button>
+      <button type="button" class="filter-chip" data-view="history" aria-pressed="false">History</button>
+    </div>
+    <div id="bet-summary" class="stats-summary-grid"></div>
+    <div id="bet-list" class="card-list"></div>
   </section>
 
   <section class="panel" data-tab="fpl">
@@ -954,6 +964,11 @@ const CONFIG = {
   matchesTabName: "Matches",
   fplTabName: "FPL",
   clubTabName: "Club",
+  // BetData: Sky Bet odds vs the model's own frozen pre-match projection,
+  // with a recommended pick and running settlement (Won/Lost/Void/Pending)
+  // once each match finishes. Bet365 doesn't license odds to third-party
+  // aggregators, so Sky Bet is used instead.
+  betsTabName: "BetData",
   // LineupsCache: pre-computed by a scheduled Apps Script trigger (see
   // refreshAllLineups), not read live - the source XXXMins tabs are driven
   // by a custom EXPECTED_MINUTES() formula that takes 20-60+ seconds to
@@ -985,7 +1000,7 @@ let fplLastRows = [];
 let aiFplAccessUnlocked = false;
 
 const state = {
-  fixtures: [], fpl: [], club: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
+  fixtures: [], fpl: [], club: [], bets: [], lineupsByClub: {}, aiFpl: [], aiFplTransfers: { title: "", moves: [] },
   aiFplChipPlan: { title: "", chips: [] }, aiFplSquad: [],
   aiFplWildcardPlan: null, aiFplFreeHitPlan: null,
   fplSortKey: "xpts", fplSortDir: -1,
@@ -1004,6 +1019,7 @@ const state = {
   // aren't comparable across competitions.
   fixtureDateFilter: "",
   fixtureRoundFilter: "",
+  betView: "upcoming",
 };
 
 const AI_FPL_ACCESS_STORAGE_KEY = "matchlabAiFplAccess";
@@ -2456,6 +2472,91 @@ function renderStats() {
   `).join("");
 }
 
+// Visual tier for an upcoming pick's card, reusing the same acc-0..acc-5
+// color convention the accuracy badges use elsewhere - here scaled to edge
+// size instead of prediction accuracy, so a bigger edge reads as a
+// stronger (more gold/green) card, same as a better prediction score does.
+function betEdgeTier(edge) {
+  if (edge >= 15) return 5;
+  if (edge >= 10) return 4;
+  if (edge >= 6) return 3;
+  return 2;
+}
+
+// Settled bets reuse the same scale for Won (green)/Lost (red); Void isn't
+// a prediction outcome at all, so it gets the same neutral tier as a
+// below-threshold "no bet" would.
+function betResultTier(result) {
+  if (result === "Won") return 4;
+  if (result === "Lost") return 0;
+  return 2;
+}
+
+function betCardHtml(b) {
+  const isSettled = b.Result && b.Result !== "Pending";
+  const edge = toNum(b["Recommended Edge"]);
+  const tier = isSettled ? betResultTier(b.Result) : betEdgeTier(edge);
+  const pl = toNum(b["Profit/Loss"]);
+  const plText = isSettled && b.Result !== "Void" ? `${pl >= 0 ? "+" : ""}${pl.toFixed(2)}u` : "";
+  return `
+    <div class="match-card acc-${tier}">
+      <div class="match-card-top">
+        <span>${escapeHtml(b["Home Team"])} vs ${escapeHtml(b["Away Team"])}</span>
+        <span>${escapeHtml(b.Date)}</span>
+      </div>
+      <div class="match-probs">
+        <div class="prob-labels"><span>Model: ${escapeHtml(b["Model Home %"])}% / ${escapeHtml(b["Model Draw %"])}% / ${escapeHtml(b["Model Away %"])}%</span></div>
+        <div class="prob-labels"><span>Sky Bet implied: ${escapeHtml(b["Implied Home %"])}% / ${escapeHtml(b["Implied Draw %"])}% / ${escapeHtml(b["Implied Away %"])}%</span></div>
+      </div>
+      <div class="match-card-top">
+        <span><strong>${escapeHtml(b["Recommended Pick"])}</strong> (edge ${edge.toFixed(1)}%)</span>
+        <span>${isSettled ? escapeHtml(b.Result) + (plText ? " " + plText : "") : "Pending"}</span>
+      </div>
+    </div>
+  `;
+}
+
+function betPerformanceSummary(settled) {
+  const graded = settled.filter((b) => b.Result === "Won" || b.Result === "Lost");
+  const wins = graded.filter((b) => b.Result === "Won").length;
+  const totalStaked = graded.reduce((sum, b) => sum + toNum(b.Stake), 0);
+  const totalPl = graded.reduce((sum, b) => sum + toNum(b["Profit/Loss"]), 0);
+  return {
+    graded: graded.length, wins, losses: graded.length - wins,
+    totalPl, roi: totalStaked ? (totalPl / totalStaked) * 100 : 0,
+  };
+}
+
+function renderBets() {
+  const summaryEl = document.getElementById("bet-summary");
+  const listEl = document.getElementById("bet-list");
+  if (!summaryEl || !listEl) return;
+
+  const upcoming = state.bets.filter((b) => b.Result === "Pending" && b["Recommended Pick"] && b["Recommended Pick"] !== "No Bet");
+  const settled = state.bets.filter((b) => b.Result && b.Result !== "Pending");
+  const perf = betPerformanceSummary(settled);
+
+  summaryEl.innerHTML = [
+    ["Record", `${perf.wins}-${perf.losses}`],
+    ["Win Rate", perf.graded ? `${((perf.wins / perf.graded) * 100).toFixed(1)}%` : "–"],
+    ["ROI", `${perf.roi >= 0 ? "+" : ""}${perf.roi.toFixed(1)}%`],
+    ["Total P/L", `${perf.totalPl >= 0 ? "+" : ""}${perf.totalPl.toFixed(2)}u`],
+  ].map(([label, value]) => `
+    <div class="stats-card">
+      <div class="stats-label">${label}</div>
+      <div class="stats-value">${value}</div>
+    </div>
+  `).join("");
+
+  const rows = state.betView === "history"
+    ? settled.slice().sort((a, b) => new Date(b.Date) - new Date(a.Date))
+    : upcoming.slice().sort((a, b) => new Date(a.Date) - new Date(b.Date));
+
+  listEl.innerHTML = rows.length
+    ? rows.map(betCardHtml).join("")
+    : `<div class="empty-state">${state.betView === "history" ? "No settled bets yet." : "No value bets right now."}</div>`;
+}
+
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
 // SnapProjA), not the live ProjH/ProjA - see matchProbsRowSnapshot. The main
 // score is the regulation-time result (see finalScore) with a "(pens)" tag
@@ -3212,6 +3313,16 @@ async function loadData() {
         showLoadErrorRow(document.getElementById("table-body"), 7, "the table");
         throw err;
       }),
+    fetchWithRetry(() => fetchSheetValues(CONFIG.betsTabName).then((v) => sheetRowsToObjects(v)), "Bets")
+      .then((bets) => {
+        state.bets = bets;
+        renderBets();
+      })
+      .catch((err) => {
+        console.error(err);
+        showLoadErrorCard(document.getElementById("bet-list"), "bet picks");
+        throw err;
+      }),
   ];
 
   // Lineups only power the click-to-expand panel, so load them in the
@@ -3340,6 +3451,15 @@ document.querySelectorAll("#stats-range-filters .filter-chip[data-range]").forEa
     btn.setAttribute("aria-pressed", "true");
     state.statsRange = btn.dataset.range;
     renderStats();
+  });
+});
+
+document.querySelectorAll("#bet-view-filters .filter-chip[data-view]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#bet-view-filters .filter-chip[data-view]").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    state.betView = btn.dataset.view;
+    renderBets();
   });
 });
 

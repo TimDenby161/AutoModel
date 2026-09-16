@@ -80,6 +80,7 @@ import getManagers as gmgr
 import getCompetitions as gcomp
 import getMatches as gmatch
 import getClubs as gclub
+import getOdds as godds
 
 try:
     import gspread
@@ -374,6 +375,44 @@ def parse_args() -> argparse.Namespace:
         "--skip-projection-snapshot",
         action="store_true",
         help="Don't freeze not-yet-started matches' ProjH/ProjA/HomeScr/AwayScr and win/draw/away win%% into MatchData's Snap* columns",
+    )
+    parser.add_argument(
+        "--skip-bets",
+        action="store_true",
+        help="Don't settle bets or fetch new odds/picks into the BetData tab",
+    )
+    parser.add_argument(
+        "--odds-api-key",
+        default="",
+        help="The Odds API key (theoddsapi.com) - required to fetch new picks; settlement of existing picks still runs without it",
+    )
+    parser.add_argument("--odds-worksheet", default="BetData")
+    parser.add_argument(
+        "--odds-competition-map",
+        type=Path,
+        default=folder / "odds_competition_map.csv",
+        help="CSV mapping AutoModel Competition ID -> The Odds API sport_key (default: odds_competition_map.csv)",
+    )
+    parser.add_argument(
+        "--bet-csv-output",
+        type=Path,
+        default=folder / "automodel_bets.csv",
+        help="CSV mirror of the BetData sheet, rewritten each run",
+    )
+    parser.add_argument("--odds-region", default="uk")
+    parser.add_argument(
+        "--odds-upcoming-window-days", type=float, default=10,
+        help="Only fetch odds for competitions with a not-yet-started match within this many days",
+    )
+    parser.add_argument("--odds-retries", type=int, default=4)
+    parser.add_argument("--odds-request-delay", type=float, default=1.0)
+    parser.add_argument(
+        "--bet-edge-threshold", type=float, default=0.03,
+        help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.03 = 3%%) to count as a recommended pick",
+    )
+    parser.add_argument(
+        "--bet-stake-units", type=float, default=1.0,
+        help="Flat stake per recommended pick, in tracking units - this only records/tracks picks, it never places a real bet",
     )
     parser.add_argument(
         "--individual-results-spreadsheet-id",
@@ -810,11 +849,22 @@ def read_existing_values(worksheet, description: str) -> list[list[Any]]:
     collapse to scientific notation (e.g. "4.92E+06") - a different number
     can display identically, and a freshly fetched real ID like "4920046"
     then never matches that string, so it looks new and gets re-appended
-    as a duplicate instead of recognized as already present."""
-    return sheet_call(
+    as a duplicate instead of recognized as already present.
+
+    A brand-new, genuinely blank sheet (e.g. one just created by
+    get_or_create_worksheet's add_worksheet fallback) comes back from
+    gspread as [[]] - one empty row - not [], since it really does have
+    exactly one (blank) row per its own row_count. Every "if not
+    existing_values:" check in this file assumes a truly empty sheet reads
+    back as [], so that case is normalized here rather than in each of the
+    six call sites that rely on it."""
+    values = sheet_call(
         lambda: worksheet.get_all_values(value_render_option="UNFORMATTED_VALUE"),
         description=description,
     )
+    if values == [[]]:
+        return []
+    return values
 
 
 def id_column_values(worksheet, description: str) -> list[str]:
@@ -981,10 +1031,26 @@ def get_or_create_worksheet(spreadsheet, worksheet_name: str, cols: int):
             description=f"Open {worksheet_name} worksheet",
         )
     except gspread.WorksheetNotFound:
-        worksheet = sheet_call(
-            lambda: spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols),
-            description=f"Create {worksheet_name} worksheet",
-        )
+        try:
+            worksheet = sheet_call(
+                lambda: spreadsheet.add_worksheet(title=worksheet_name, rows=1, cols=cols),
+                description=f"Create {worksheet_name} worksheet",
+            )
+        except RuntimeError as exc:
+            # add_worksheet isn't idempotent, unlike everything else
+            # sheet_call retries: if attempt 1's REQUEST actually created the
+            # sheet server-side but its RESPONSE was lost to a client-side
+            # timeout, every retry after that correctly reports "already
+            # exists" - a permanent error from then on, not a transient one -
+            # and burns the entire retry budget getting nowhere. Recognize
+            # that specific case and just fetch the sheet a prior attempt
+            # already created, instead of treating it as failure.
+            if "already exists" not in str(exc):
+                raise
+            worksheet = sheet_call(
+                lambda: spreadsheet.worksheet(worksheet_name),
+                description=f"Open {worksheet_name} worksheet (already created by a prior attempt)",
+            )
         cache = getattr(spreadsheet, "_worksheet_cache", None)
         if cache is not None:
             cache[worksheet_name] = worksheet
@@ -1887,7 +1953,7 @@ MATCHES_STARTED_COL = 2
 MATCHES_SNAPSHOT_SOURCE_COLS = [19, 20, 21, 24, 40, 41, 42]  # ProjH, ProjA, HomeScr, AwayScr, HW%, D%, AW%
 
 
-def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> None:
+def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     """Freezes each not-yet-started match's current ProjH/ProjA/HomeScr/
     AwayScr and Home/Draw/Away win% into extra MatchData columns, sitting
     past gmatch.HEADERS's own columns so sync_matches's normal row
@@ -1899,6 +1965,14 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
     would predict, not what was actually predicted beforehand, since
     HomeScr/AwayScr (and everything derived from them) are literally
     formulas built on TODAY().
+
+    Returns Match ID -> {SNAPSHOT_HEADERS field: value} for every
+    not-yet-started match with a projection available this run (the
+    win/draw/away fields are fractions 0-1, not whole-number percentages -
+    callers comparing against a whole-number source, e.g. odds-implied
+    probabilities, need to multiply by 100). sync_bets reuses this
+    in-memory instead of re-reading MatchData, since it needs exactly the
+    same "what did the model believe right now" snapshot.
     """
     match_worksheet = sheet_call(lambda: spreadsheet.worksheet(args.match_worksheet), description=f"Open {args.match_worksheet} worksheet")
     matches_worksheet = sheet_call(lambda: spreadsheet.worksheet(MATCHES_WORKSHEET), description=f"Open {MATCHES_WORKSHEET} worksheet")
@@ -1935,7 +2009,7 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
     matchdata_values = read_existing_values(match_worksheet, "Read MatchData for snapshot")
     if len(matchdata_values) < 2:
         safe_print("Snapshot: MatchData is empty; nothing to do.")
-        return
+        return {}
     match_id_col = gmatch.HEADERS.index("Match ID")
     row_by_match_id: dict[str, int] = {}
     for offset, row in enumerate(matchdata_values[1:]):
@@ -1950,6 +2024,7 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
     )
 
     updates = []
+    snapshots: dict[str, dict[str, Any]] = {}
     for row in matches_values:
         match_id = normalize_sheet_value(value_at(row, 0))
         if not match_id or match_id not in row_by_match_id:
@@ -1961,6 +2036,7 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
         if values[0] == "" and values[1] == "":
             continue  # no projection available yet (e.g. not enough matches played for a rating)
 
+        snapshots[match_id] = dict(zip(SNAPSHOT_HEADERS, values))
         updates.append({
             "range": f"{snap_start_letter}{row_by_match_id[match_id]}:{snap_end_letter}{row_by_match_id[match_id]}",
             "values": [values],
@@ -1982,6 +2058,222 @@ def snapshot_pre_match_projections(spreadsheet, args: argparse.Namespace) -> Non
                 description=f"Write pre-match snapshots {start + 1}-{start + len(chunk)}",
             )
     safe_print(f"Snapshot: captured pre-match projections for {len(updates):,} not-yet-started match(es).")
+    return snapshots
+
+
+BET_HEADERS = [
+    "Match ID", "Competition ID", "Date", "Home Team", "Away Team",
+    "Sky Bet Home Odds", "Sky Bet Draw Odds", "Sky Bet Away Odds",
+    "Implied Home %", "Implied Draw %", "Implied Away %",
+    "Model Home %", "Model Draw %", "Model Away %",
+    "Edge Home", "Edge Draw", "Edge Away",
+    "Recommended Pick", "Recommended Edge",
+    "Stake", "Result", "Profit/Loss", "Odds Retrieved UTC",
+]
+BET_OUTCOME_ODDS_COLUMN = {
+    "Home Win": "Sky Bet Home Odds", "Draw": "Sky Bet Draw Odds", "Away Win": "Sky Bet Away Odds",
+}
+
+
+def grade_bet(recommended_pick: str, actual_result: str) -> str:
+    if recommended_pick == "No Bet":
+        return "No Bet"
+    if not actual_result:
+        return "Pending"
+    return "Won" if recommended_pick == actual_result else "Lost"
+
+
+def bet_profit_loss(result: str, stake: float, odds: float) -> float:
+    """Flat staking: stake * (odds - 1) if the bet won, -stake if lost, 0
+    otherwise (pending/void/no-bet). This system recommends and tracks
+    picks - it never places a real bet or touches a bookmaker account."""
+    if result == "Won":
+        return round(stake * (odds - 1), 2)
+    if result == "Lost":
+        return round(-stake, 2)
+    return 0.0
+
+
+def sync_bets(
+    spreadsheet,
+    args: argparse.Namespace,
+    all_matches: dict[str, dict[str, Any]] | None,
+    snapshots: dict[str, dict[str, Any]],
+) -> list[tuple[str, str]]:
+    """Settle previously-recommended bets whose match has since finished,
+    then fetch fresh Sky Bet odds (getOdds.collect_odds) for not-yet-started
+    matches and record a value-bet recommendation for each one where the
+    model's edge over the odds' implied probability clears
+    --bet-edge-threshold. Structured like every other sync_* function
+    (existing_by_id, updates/appended_rows, write_row_batches/
+    append_row_batches, CSV rebuild) for the same reasons they are.
+
+    Settlement runs whenever match results are available, independent of
+    whether an odds API key is configured - so bets already on the board
+    still get graded even on a run where fresh odds aren't fetched.
+
+    A real recommendation, once made, is locked in - later runs don't
+    recompute or overwrite an existing non-"No Bet" pick just because the
+    odds or model moved before kickoff, the same way a real bet can't be
+    silently swapped for a different outcome after it's placed. Only a
+    brand-new match, or one still sitting at "No Bet", gets its pick
+    (re)computed on a later run."""
+    worksheet = get_or_create_worksheet(spreadsheet, args.odds_worksheet, len(BET_HEADERS))
+    existing_values = read_existing_values(worksheet, "Read BetData sheet")
+
+    if not existing_values:
+        sheet_call(lambda: worksheet.update([BET_HEADERS]), description="Write BetData header")
+        existing_values = [BET_HEADERS]
+
+    if existing_values[0] != BET_HEADERS:
+        raise SystemExit(
+            "BetData's header row doesn't match this script's current "
+            "BET_HEADERS layout. Clear the sheet or fix the header before syncing."
+        )
+
+    col = {name: i for i, name in enumerate(BET_HEADERS)}
+    existing_by_id: dict[str, tuple[int, list[Any]]] = {}
+    for offset, row in enumerate(existing_values[1:]):
+        padded = row + [""] * (len(BET_HEADERS) - len(row))
+        match_id = str(padded[col["Match ID"]]).strip()
+        if match_id:
+            existing_by_id[match_id] = (offset + 2, padded)  # +2: header row + 1-based
+
+    errors: list[tuple[str, str]] = []
+    updates: list[tuple[int, list[Any]]] = []
+    settled_count = 0
+
+    # 1. Settle pending bets whose match has since finished - reuses the
+    # same all_matches dict and "Finished"=="1" gate as
+    # players_who_played_recently, since it's the same "did this match
+    # just conclude" question.
+    if all_matches:
+        for match_id, (row_number, row) in existing_by_id.items():
+            if row[col["Result"]] != "Pending":
+                continue
+            match = all_matches.get(match_id)
+            if not match or str(match.get("Finished", "")) != "1":
+                continue
+            if str(match.get("Cancelled", "")) == "1":
+                row[col["Result"]] = "Void"
+                row[col["Profit/Loss"]] = 0.0
+                updates.append((row_number, row))
+                settled_count += 1
+                continue
+            actual_result = str(match.get("Result", ""))  # "Home Win"/"Away Win"/"Draw"
+            recommended = str(row[col["Recommended Pick"]])
+            result = grade_bet(recommended, actual_result)
+            odds_col = BET_OUTCOME_ODDS_COLUMN.get(recommended)
+            odds = float(row[col[odds_col]]) if odds_col and row[col[odds_col]] not in ("", None) else 0.0
+            row[col["Result"]] = result
+            row[col["Profit/Loss"]] = bet_profit_loss(result, args.bet_stake_units, odds)
+            updates.append((row_number, row))
+            settled_count += 1
+
+    # 2. Fetch fresh odds + compute new picks for not-yet-started matches.
+    appended_rows: list[list[Any]] = []
+    if all_matches and args.odds_api_key:
+        competition_map = godds.load_competition_map(args.odds_competition_map)
+        odds_rows, odds_errors = godds.collect_odds(
+            all_matches, competition_map, args.odds_api_key,
+            region=args.odds_region, window_days=args.odds_upcoming_window_days,
+            retries=args.odds_retries, request_delay=args.odds_request_delay,
+        )
+        errors.extend((item, error) for _kind, item, error in odds_errors)
+
+        for match_id, odds_row in odds_rows.items():
+            # A real pick, once made, is locked in - a genuine bet can't be
+            # silently swapped for a different outcome because odds moved
+            # later in the week. Only a match with no row yet, or one still
+            # sitting at "No Bet" (never actually a commitment), gets its
+            # recommendation (re)computed here.
+            existing_row = existing_by_id.get(match_id)
+            if existing_row and existing_row[1][col["Recommended Pick"]] not in ("", "No Bet"):
+                continue
+
+            snapshot = snapshots.get(match_id)
+            if not snapshot:
+                continue  # no model projection available for this match yet
+
+            model_h = float(snapshot.get("SnapHomeWinPct") or 0) * 100
+            model_d = float(snapshot.get("SnapDrawPct") or 0) * 100
+            model_a = float(snapshot.get("SnapAwayWinPct") or 0) * 100
+            implied_h = float(odds_row["Implied Home %"])
+            implied_d = float(odds_row["Implied Draw %"])
+            implied_a = float(odds_row["Implied Away %"])
+            edge_h, edge_d, edge_a = model_h - implied_h, model_d - implied_d, model_a - implied_a
+
+            best_pick, best_edge = max(
+                [("Home Win", edge_h), ("Draw", edge_d), ("Away Win", edge_a)], key=lambda pair: pair[1]
+            )
+            if best_edge < args.bet_edge_threshold * 100:
+                best_pick, best_edge = "No Bet", best_edge
+
+            match = all_matches.get(match_id, {})
+            row_values: list[Any] = [""] * len(BET_HEADERS)
+            row_values[col["Match ID"]] = int(match_id)
+            row_values[col["Competition ID"]] = (
+                int(odds_row["Competition ID"]) if odds_row.get("Competition ID") else ""
+            )
+            row_values[col["Date"]] = str(match.get("Match UTC", ""))[:10]
+            row_values[col["Home Team"]] = odds_row["Home Team"]
+            row_values[col["Away Team"]] = odds_row["Away Team"]
+            row_values[col["Sky Bet Home Odds"]] = odds_row["Home Odds"]
+            row_values[col["Sky Bet Draw Odds"]] = odds_row["Draw Odds"]
+            row_values[col["Sky Bet Away Odds"]] = odds_row["Away Odds"]
+            row_values[col["Implied Home %"]] = implied_h
+            row_values[col["Implied Draw %"]] = implied_d
+            row_values[col["Implied Away %"]] = implied_a
+            row_values[col["Model Home %"]] = round(model_h, 2)
+            row_values[col["Model Draw %"]] = round(model_d, 2)
+            row_values[col["Model Away %"]] = round(model_a, 2)
+            row_values[col["Edge Home"]] = round(edge_h, 2)
+            row_values[col["Edge Draw"]] = round(edge_d, 2)
+            row_values[col["Edge Away"]] = round(edge_a, 2)
+            row_values[col["Recommended Pick"]] = best_pick
+            row_values[col["Recommended Edge"]] = round(best_edge, 2)
+            row_values[col["Stake"]] = args.bet_stake_units if best_pick != "No Bet" else 0
+            row_values[col["Result"]] = "No Bet" if best_pick == "No Bet" else "Pending"
+            row_values[col["Profit/Loss"]] = 0.0
+            row_values[col["Odds Retrieved UTC"]] = odds_row["Odds Retrieved UTC"]
+
+            if match_id in existing_by_id:
+                row_number, _ = existing_by_id[match_id]
+                updates.append((row_number, row_values))
+            else:
+                appended_rows.append(row_values)
+
+    last_col = column_letters(len(BET_HEADERS))
+    failed_rows = (
+        write_row_batches(updates, args.sheet_batch_size, worksheet=worksheet, last_col=last_col, label="BetData")
+        if updates else set()
+    )
+    appended_ok = (
+        append_row_batches(appended_rows, args.sheet_batch_size, worksheet=worksheet, label="BetData")
+        if appended_rows else []
+    )
+
+    final_by_id: dict[str, list[Any]] = {
+        match_id: row for match_id, (_, row) in existing_by_id.items()
+    }
+    for row_number, row in updates:
+        if row_number not in failed_rows:
+            final_by_id[str(row[col["Match ID"]])] = row
+    for row in appended_ok:
+        final_by_id[str(row[col["Match ID"]])] = row
+
+    tmp_path = args.bet_csv_output.with_suffix(args.bet_csv_output.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(BET_HEADERS)
+        writer.writerows(final_by_id.values())
+    tmp_path.replace(args.bet_csv_output)
+
+    safe_print(
+        f"BetData done. {settled_count:,} bet(s) settled, {len(appended_ok):,}/{len(appended_rows):,} new pick(s) added, "
+        f"{len(updates) - len(failed_rows):,}/{len(updates):,} row(s) written, {len(errors):,} odds error(s)."
+    )
+    return errors
 
 
 def load_matchdata_competition_ids(args: argparse.Namespace) -> set[str] | None:
@@ -2589,6 +2881,8 @@ def main() -> int:
     args.matchdata_competition_input = args.matchdata_competition_input.resolve()
     args.competition_parents_cache = args.competition_parents_cache.resolve()
     args.match_local_cache = args.match_local_cache.resolve()
+    args.odds_competition_map = args.odds_competition_map.resolve()
+    args.bet_csv_output = args.bet_csv_output.resolve()
     args.match_csv_output = args.match_csv_output.resolve()
     args.match_errors = args.match_errors.resolve()
     args.club_csv_output = args.club_csv_output.resolve()
@@ -2661,11 +2955,21 @@ def main() -> int:
                     csv_id_values(args.match_csv_output, "Read final MatchData IDs from CSV"),
                 ),
             )
+        snapshots: dict[str, dict[str, Any]] = {}
         if not args.skip_projection_snapshot:
-            run_phase(
+            snapshot_result = run_phase(
                 "Pre-match projection snapshot",
                 lambda: snapshot_pre_match_projections(spreadsheet, args),
             )
+            if snapshot_result is not None:
+                snapshots = snapshot_result
+        if not args.skip_bets:
+            bet_errors = run_phase(
+                "Bet sync",
+                lambda: sync_bets(spreadsheet, args, all_matches, snapshots),
+            )
+            if bet_errors:
+                safe_print(f"Bet sync had {len(bet_errors):,} odds error(s) - see log above.")
 
     errors: list[tuple[str, str]] = []
     if args.skip_players:

@@ -1,0 +1,17 @@
+Competition ID,Sport Key,Name
+47,soccer_epl,Premier League
+48,soccer_efl_champ,Championship
+108,soccer_england_league1,League One
+109,soccer_england_league2,League Two
+133,soccer_england_efl_cup,EFL Cup
+54,soccer_germany_bundesliga,Bundesliga
+53,soccer_france_ligue_one,Ligue 1
+55,soccer_italy_serie_a,Serie A
+87,soccer_spain_la_liga,LaLiga
+71,soccer_turkey_super_league,Super Lig
+268,soccer_brazil_campeonato,Brazil Serie A
+42,soccer_uefa_champs_league,Champions League
+73,soccer_uefa_europa_league,Europa League
+10216,soccer_uefa_europa_conference_league,Conference League
+45,soccer_conmebol_copa_libertadores,CONMEBOL Libertadores
+299,soccer_conmebol_copa_sudamericana,CONMEBOL Sudamericana

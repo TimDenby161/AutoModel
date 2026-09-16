@@ -28,6 +28,10 @@ on:
         description: "Clubs"
         type: boolean
         default: true
+      sync_bets:
+        description: "Bets"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -63,11 +67,12 @@ jobs:
             [ "${{ inputs.sync_competitions }}" != "true" ] && FLAGS="$FLAGS --skip-competitions"
             [ "${{ inputs.sync_matches }}" != "true" ] && FLAGS="$FLAGS --skip-matches"
             [ "${{ inputs.sync_clubs }}" != "true" ] && FLAGS="$FLAGS --skip-clubs"
+            [ "${{ inputs.sync_bets }}" != "true" ] && FLAGS="$FLAGS --skip-bets"
           fi
           echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
 
       - name: Run sync
-        run: python syncPlayersToSheet.py ${{ steps.flags.outputs.flags }}
+        run: python syncPlayersToSheet.py ${{ steps.flags.outputs.flags }} --odds-api-key "${{ secrets.ODDS_API_KEY }}"
 
       - name: Remove credentials
         if: always()
