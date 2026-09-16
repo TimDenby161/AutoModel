@@ -407,8 +407,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--odds-retries", type=int, default=4)
     parser.add_argument("--odds-request-delay", type=float, default=1.0)
     parser.add_argument(
-        "--bet-edge-threshold", type=float, default=0.03,
-        help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.03 = 3%%) to count as a recommended pick",
+        "--bet-edge-threshold", type=float, default=0.10,
+        help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.10 = 10%%) to count as a recommended pick",
     )
     parser.add_argument(
         "--bet-stake-units", type=float, default=1.0,

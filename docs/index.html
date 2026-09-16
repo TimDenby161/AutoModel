@@ -2492,26 +2492,71 @@ function betResultTier(result) {
   return 2;
 }
 
+// Same segmented-bar visual as renderProbBar (Fixtures/Results), but built
+// straight from three already-computed percentages with a caller-supplied
+// label per segment - renderProbBar's own projH/projA params are only ever
+// used as a validity guard, never displayed, so a fresh, simpler helper
+// avoids passing it meaningless dummy score values just to reuse it.
+function renderPercentBar(pctH, pctD, pctA, labelH, labelD, labelA) {
+  if (![pctH, pctD, pctA].every(Number.isFinite)) return "";
+  const h = Math.round(pctH), d = Math.round(pctD), a = Math.round(pctA);
+  const drawStart = h, awayStart = h + d;
+  return `
+    <div class="match-probs">
+      <div class="prob-bar">
+        <span class="prob-home" style="width:${h}%"></span>
+        <span class="prob-draw" style="width:${d}%"></span>
+        <span class="prob-away" style="width:${a}%"></span>
+      </div>
+      <div class="prob-labels">
+        <span class="prob-home" style="left:0%; width:${h}%">${labelH}</span>
+        <span class="prob-draw" style="left:${drawStart}%; width:${d}%">${labelD}</span>
+        <span class="prob-away" style="left:${awayStart}%; width:${a}%">${labelA}</span>
+      </div>
+    </div>
+  `;
+}
+
+// Same card shell as fixtureCardHtml (match-card/match-comp/match-teams),
+// so a bet card reads as "a Matches fixture card" at a glance - the
+// difference is the center slot shows the recommended pick instead of a
+// projected score, and there are two probability bars underneath instead
+// of one: the model's own Home/Draw/Away % (same style as a normal
+// fixture card), then a second "Bookies odds" bar sized the same way from
+// the odds' implied probability, but labeled with the actual Sky Bet
+// decimal odds rather than a percentage.
 function betCardHtml(b) {
-  const isSettled = b.Result && b.Result !== "Pending";
+  const isSettled = b.Result && b.Result !== "Pending" && b.Result !== "No Bet";
   const edge = toNum(b["Recommended Edge"]);
   const tier = isSettled ? betResultTier(b.Result) : betEdgeTier(edge);
   const pl = toNum(b["Profit/Loss"]);
-  const plText = isSettled && b.Result !== "Void" ? `${pl >= 0 ? "+" : ""}${pl.toFixed(2)}u` : "";
+  const plText = isSettled && b.Result !== "Void" ? ` ${pl >= 0 ? "+" : ""}${pl.toFixed(2)}u` : "";
+  const modelBar = renderPercentBar(
+    toNum(b["Model Home %"]), toNum(b["Model Draw %"]), toNum(b["Model Away %"]),
+    `${Math.round(toNum(b["Model Home %"]))}%`, `${Math.round(toNum(b["Model Draw %"]))}%`, `${Math.round(toNum(b["Model Away %"]))}%`
+  );
+  const oddsBar = renderPercentBar(
+    toNum(b["Implied Home %"]), toNum(b["Implied Draw %"]), toNum(b["Implied Away %"]),
+    toNum(b["Sky Bet Home Odds"]).toFixed(2), toNum(b["Sky Bet Draw Odds"]).toFixed(2), toNum(b["Sky Bet Away Odds"]).toFixed(2)
+  );
   return `
     <div class="match-card acc-${tier}">
       <div class="match-card-top">
-        <span>${escapeHtml(b["Home Team"])} vs ${escapeHtml(b["Away Team"])}</span>
-        <span>${escapeHtml(b.Date)}</span>
+        <div class="accuracy-badge" aria-label="${edge.toFixed(1)}% edge">${edge.toFixed(1)}%</div>
+        <div class="match-comp">
+          <span>${escapeHtml(formatKickoff(b.Date))}</span>
+        </div>
       </div>
-      <div class="match-probs">
-        <div class="prob-labels"><span>Model: ${escapeHtml(b["Model Home %"])}% / ${escapeHtml(b["Model Draw %"])}% / ${escapeHtml(b["Model Away %"])}%</span></div>
-        <div class="prob-labels"><span>Sky Bet implied: ${escapeHtml(b["Implied Home %"])}% / ${escapeHtml(b["Implied Draw %"])}% / ${escapeHtml(b["Implied Away %"])}%</span></div>
+      <div class="match-teams">
+        <div class="match-team">${escapeHtml(b["Home Team"])}</div>
+        <div class="match-score has-proj">
+          <span class="proj-box">${escapeHtml(b["Recommended Pick"])}</span>
+        </div>
+        <div class="match-team away">${escapeHtml(b["Away Team"])}</div>
       </div>
-      <div class="match-card-top">
-        <span><strong>${escapeHtml(b["Recommended Pick"])}</strong> (edge ${edge.toFixed(1)}%)</span>
-        <span>${isSettled ? escapeHtml(b.Result) + (plText ? " " + plText : "") : "Pending"}</span>
-      </div>
+      ${modelBar}
+      ${oddsBar}
+      ${isSettled ? `<div class="match-card-top"><span>${escapeHtml(b.Result)}${plText}</span></div>` : ""}
     </div>
   `;
 }
@@ -2532,8 +2577,19 @@ function renderBets() {
   const listEl = document.getElementById("bet-list");
   if (!summaryEl || !listEl) return;
 
-  const upcoming = state.bets.filter((b) => b.Result === "Pending" && b["Recommended Pick"] && b["Recommended Pick"] !== "No Bet");
-  const settled = state.bets.filter((b) => b.Result && b.Result !== "Pending");
+  // Only today's picks, only a real edge worth acting on, biggest edge
+  // first - the backend itself only ever records a pick at 10%+ edge, but
+  // this filters on the number too (not just Result !== "No Bet") so any
+  // earlier data recorded under an older, lower threshold doesn't show up
+  // here alongside the ones that actually clear today's bar.
+  const today = new Date();
+  const upcoming = state.bets
+    .filter((b) => b.Result === "Pending")
+    .filter((b) => toNum(b["Recommended Edge"]) > 10)
+    .filter((b) => isSameLocalDay(b.Date, today))
+    .sort((a, b) => toNum(b["Recommended Edge"]) - toNum(a["Recommended Edge"]));
+
+  const settled = state.bets.filter((b) => b.Result && b.Result !== "Pending" && b.Result !== "No Bet");
   const perf = betPerformanceSummary(settled);
 
   summaryEl.innerHTML = [
@@ -2550,11 +2606,11 @@ function renderBets() {
 
   const rows = state.betView === "history"
     ? settled.slice().sort((a, b) => new Date(b.Date) - new Date(a.Date))
-    : upcoming.slice().sort((a, b) => new Date(a.Date) - new Date(b.Date));
+    : upcoming;
 
   listEl.innerHTML = rows.length
     ? rows.map(betCardHtml).join("")
-    : `<div class="empty-state">${state.betView === "history" ? "No settled bets yet." : "No value bets right now."}</div>`;
+    : `<div class="empty-state">${state.betView === "history" ? "No settled bets yet." : "No bets over 10% edge today."}</div>`;
 }
 
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
