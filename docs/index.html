@@ -411,9 +411,16 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
-  .bet-balance-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-  .bet-balance-input { width: 100px; text-align: right; }
-  .bet-balance-hint { font-size: 11px; color: var(--text-muted); }
+  .contents { display: contents; }
+  .stats-value-input { display: flex; align-items: baseline; gap: 2px; }
+  .stats-value-prefix { font-size: 24px; font-weight: 800; }
+  .stats-input {
+    appearance: none; border: none; background: transparent; color: inherit;
+    font-family: inherit; font-size: 24px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; width: 100%; padding: 0; min-width: 0;
+  }
+  .stats-input:focus { outline: none; }
+  .stats-input::placeholder { color: var(--text-muted); }
   #table-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
   #table-view-toggle .filter-chip {
     flex: 1; text-align: center; padding: 6px 10px; border-radius: 8px; font-size: 13px;
@@ -861,14 +868,19 @@
         <button type="button" class="date-nav-btn" id="bet-date-next" aria-label="Next day">&#8250;</button>
       </div>
     </div>
-    <div class="secondary-filters" id="bet-balance-row">
-      <label for="bet-balance-input" class="bet-balance-label">Your balance</label>
-      <input type="number" id="bet-balance-input" class="date-filter-input bet-balance-input"
-        placeholder="e.g. 850" min="0" step="0.01" inputmode="decimal"
-        aria-label="Enter your current balance to recalculate stakes for today">
-      <span class="bet-balance-hint">Recalculates stakes below only - not saved</span>
+    <div id="bet-summary" class="stats-summary-grid">
+      <div class="stats-card">
+        <div class="stats-label">Your Balance</div>
+        <div class="stats-value stats-value-input">
+          <span class="stats-value-prefix">£</span>
+          <input type="number" id="bet-balance-input" class="stats-input" placeholder="1000"
+            min="0" step="0.01" inputmode="decimal"
+            aria-label="Enter your current balance to recalculate stakes for today">
+        </div>
+      </div>
+      <div id="bet-summary-rest" class="contents"></div>
     </div>
-    <div id="bet-summary" class="stats-summary-grid"></div>
+    <p class="stats-note">Enter your balance above to see what you'd stake - not saved anywhere.</p>
     <div id="bet-list" class="card-list"></div>
   </section>
 
@@ -2570,10 +2582,16 @@ function betCardHtml(b, userBalance) {
   const tier = isSettled ? betResultTier(b.Result) : betEdgeTier(edge);
   const pl = toNum(b["Profit/Loss"]);
   const plText = isSettled && b.Result !== "Void" ? ` ${pl >= 0 ? "+" : ""}${formatGbp(pl)}` : "";
-  const displayStake = isSettled ? toNum(b.Stake) : effectiveStake(b, userBalance);
-  const stakeLine = displayStake > 0
-    ? `<div class="match-card-top"><span>Stake: ${formatGbp(displayStake)}</span></div>`
-    : "";
+  const modelStake = toNum(b.Stake);
+  const yourStake = !isSettled && userBalance ? effectiveStake(b, userBalance) : null;
+  const stakeLine = isSettled
+    ? (modelStake > 0 ? `<div class="match-card-top"><span>Stake: ${formatGbp(modelStake)}</span></div>` : "")
+    : (modelStake > 0
+        ? `<div class="match-card-top">
+            <span>Model stake (£${STARTING_BANKROLL}): ${formatGbp(modelStake)}</span>
+            ${yourStake != null ? `<span>Your stake: ${formatGbp(yourStake)}</span>` : ""}
+          </div>`
+        : "");
   const modelBar = renderPercentBar(
     toNum(b["Model Home %"]), toNum(b["Model Draw %"]), toNum(b["Model Away %"]),
     `${Math.round(toNum(b["Model Home %"]))}%`, `${Math.round(toNum(b["Model Draw %"]))}%`, `${Math.round(toNum(b["Model Away %"]))}%`
@@ -2618,15 +2636,18 @@ function betPerformanceSummary(settled) {
 }
 
 function renderBets() {
-  const summaryEl = document.getElementById("bet-summary");
+  // #bet-summary-rest (not #bet-summary itself) gets its innerHTML replaced
+  // each render - the "Your Balance" input lives as a permanent sibling
+  // outside that container (display:contents, so it still lays out as a
+  // grid item right alongside Bankroll) specifically so typing into it
+  // doesn't get the element torn down and recreated mid-keystroke.
+  const summaryRestEl = document.getElementById("bet-summary-rest");
   const listEl = document.getElementById("bet-list");
   const dateNav = document.getElementById("bet-date-nav");
-  const balanceRow = document.getElementById("bet-balance-row");
   const balanceInput = document.getElementById("bet-balance-input");
-  if (!summaryEl || !listEl) return;
+  if (!summaryRestEl || !listEl) return;
 
   if (dateNav) dateNav.hidden = state.betView !== "upcoming";
-  if (balanceRow) balanceRow.hidden = state.betView !== "upcoming";
   const enteredBalance = balanceInput ? parseFloat(balanceInput.value) : NaN;
   const userBalance = Number.isFinite(enteredBalance) && enteredBalance > 0 ? enteredBalance : null;
 
@@ -2647,8 +2668,8 @@ function renderBets() {
   const settled = state.bets.filter((b) => b.Result && b.Result !== "Pending" && b.Result !== "No Bet");
   const perf = betPerformanceSummary(settled);
 
-  summaryEl.innerHTML = [
-    ["Bankroll", formatGbp(perf.bankroll)],
+  summaryRestEl.innerHTML = [
+    ["Model Bankroll", formatGbp(perf.bankroll)],
     ["Record", `${perf.wins}-${perf.losses}`],
     ["Win Rate", perf.graded ? `${((perf.wins / perf.graded) * 100).toFixed(1)}%` : "–"],
     ["ROI", `${perf.roi >= 0 ? "+" : ""}${perf.roi.toFixed(1)}%`],
