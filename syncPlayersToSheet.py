@@ -2180,7 +2180,15 @@ def sync_bets(
     odds or model moved before kickoff, the same way a real bet can't be
     silently swapped for a different outcome after it's placed. Only a
     brand-new match, or one still sitting at "No Bet", gets its pick
-    (re)computed on a later run."""
+    (re)computed on a later run.
+
+    The stake is different: it keeps being re-sized every run for any
+    still-open (Pending, not yet kicked off) pick, against that run's
+    current bankroll - so yesterday's settled results (win or lose) change
+    how much every still-upcoming pick recommends staking today, the same
+    way a real bettor re-sizes tomorrow's bet off tonight's bankroll rather
+    than a number decided a week earlier. Once a match kicks off, its
+    stake is left as whatever it last resolved to."""
     worksheet = get_or_create_worksheet(spreadsheet, args.odds_worksheet, len(BET_HEADERS))
     existing_values = read_existing_values(worksheet, "Read BetData sheet")
 
@@ -2244,6 +2252,39 @@ def sync_bets(
     bankroll = current_bankroll(
         args.starting_bankroll, (row for _, row in existing_by_id.values()), col
     )
+
+    # 1.5. Re-size the stake on every already-recommended bet that's still
+    # open (Pending and not yet kicked off) using today's bankroll. The
+    # pick itself and the odds/model% it was made on stay locked in (see
+    # the note on the "locked in" pick semantics below) - only the amount
+    # to actually stake keeps compounding, the same way a real bettor
+    # re-sizes tomorrow's bet off tonight's results instead of staking
+    # whatever number was decided a week earlier.
+    if all_matches:
+        for match_id, (row_number, row) in existing_by_id.items():
+            if row[col["Recommended Pick"]] in ("", "No Bet"):
+                continue
+            if row[col["Result"]] != "Pending":
+                continue
+            match = all_matches.get(match_id)
+            if match and str(match.get("Started", "")) == "1":
+                continue  # kicked off - treat the last-computed stake as final
+            pick = row[col["Recommended Pick"]]
+            model_pct_col = BET_OUTCOME_MODEL_PCT_COLUMN.get(pick)
+            odds_col = BET_OUTCOME_ODDS_COLUMN.get(pick)
+            if not model_pct_col or not odds_col:
+                continue
+            try:
+                model_pct = float(row[col[model_pct_col]])
+                pick_odds = float(row[col[odds_col]])
+            except (TypeError, ValueError):
+                continue
+            new_stake = kelly_stake(model_pct / 100, pick_odds, bankroll)
+            new_bankroll_at_pick = round(bankroll, 2)
+            if new_stake != row[col["Stake"]] or new_bankroll_at_pick != row[col["Bankroll At Pick"]]:
+                row[col["Stake"]] = new_stake
+                row[col["Bankroll At Pick"]] = new_bankroll_at_pick
+                updates.append((row_number, row))
 
     # 2. Fetch fresh odds + compute new picks for not-yet-started matches.
     appended_rows: list[list[Any]] = []
