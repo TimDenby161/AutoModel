@@ -411,6 +411,9 @@
   }
   .round-nav-btn:disabled { opacity: 0.35; }
   .round-nav-btn:active:not(:disabled), .date-nav-btn:active { opacity: 0.6; }
+  .bet-balance-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .bet-balance-input { width: 100px; text-align: right; }
+  .bet-balance-hint { font-size: 11px; color: var(--text-muted); }
   #table-view-toggle { display: flex; gap: 8px; margin-bottom: 10px; }
   #table-view-toggle .filter-chip {
     flex: 1; text-align: center; padding: 6px 10px; border-radius: 8px; font-size: 13px;
@@ -857,6 +860,13 @@
         <input type="date" id="bet-date-filter" class="date-filter-input" aria-label="Filter bets by date">
         <button type="button" class="date-nav-btn" id="bet-date-next" aria-label="Next day">&#8250;</button>
       </div>
+    </div>
+    <div class="secondary-filters" id="bet-balance-row">
+      <label for="bet-balance-input" class="bet-balance-label">Your balance</label>
+      <input type="number" id="bet-balance-input" class="date-filter-input bet-balance-input"
+        placeholder="e.g. 850" min="0" step="0.01" inputmode="decimal"
+        aria-label="Enter your current balance to recalculate stakes for today">
+      <span class="bet-balance-hint">Recalculates stakes below only - not saved</span>
     </div>
     <div id="bet-summary" class="stats-summary-grid"></div>
     <div id="bet-list" class="card-list"></div>
@@ -2535,21 +2545,34 @@ function renderPercentBar(pctH, pctD, pctA, labelH, labelD, labelA) {
 // decimal odds rather than a percentage.
 // Must match syncPlayersToSheet.py's --starting-bankroll default - used
 // here purely to show a running bankroll figure, never sent anywhere.
-const STARTING_BANKROLL = 970.63;
+const STARTING_BANKROLL = 1000;
 
 function formatGbp(n) {
   const v = toNum(n);
   return `${v < 0 ? "-" : ""}£${Math.abs(v).toFixed(2)}`;
 }
 
-function betCardHtml(b) {
+// Stake stored on a pending pick was Kelly-sized as a fraction of
+// "Bankroll At Pick" - recovering that fraction and applying it to a
+// user-entered real balance gives the equivalent stake for their actual
+// money, without needing the backend's tracked bankroll to match it.
+function effectiveStake(b, userBalance) {
+  const rawStake = toNum(b.Stake);
+  if (!userBalance) return rawStake;
+  const bankrollAtPick = toNum(b["Bankroll At Pick"]);
+  if (!(bankrollAtPick > 0)) return rawStake;
+  return (rawStake / bankrollAtPick) * userBalance;
+}
+
+function betCardHtml(b, userBalance) {
   const isSettled = b.Result && b.Result !== "Pending" && b.Result !== "No Bet";
   const edge = toNum(b["Recommended Edge"]);
   const tier = isSettled ? betResultTier(b.Result) : betEdgeTier(edge);
   const pl = toNum(b["Profit/Loss"]);
   const plText = isSettled && b.Result !== "Void" ? ` ${pl >= 0 ? "+" : ""}${formatGbp(pl)}` : "";
-  const stakeLine = toNum(b.Stake) > 0
-    ? `<div class="match-card-top"><span>Stake: ${formatGbp(b.Stake)}</span></div>`
+  const displayStake = isSettled ? toNum(b.Stake) : effectiveStake(b, userBalance);
+  const stakeLine = displayStake > 0
+    ? `<div class="match-card-top"><span>Stake: ${formatGbp(displayStake)}</span></div>`
     : "";
   const modelBar = renderPercentBar(
     toNum(b["Model Home %"]), toNum(b["Model Draw %"]), toNum(b["Model Away %"]),
@@ -2598,9 +2621,14 @@ function renderBets() {
   const summaryEl = document.getElementById("bet-summary");
   const listEl = document.getElementById("bet-list");
   const dateNav = document.getElementById("bet-date-nav");
+  const balanceRow = document.getElementById("bet-balance-row");
+  const balanceInput = document.getElementById("bet-balance-input");
   if (!summaryEl || !listEl) return;
 
   if (dateNav) dateNav.hidden = state.betView !== "upcoming";
+  if (balanceRow) balanceRow.hidden = state.betView !== "upcoming";
+  const enteredBalance = balanceInput ? parseFloat(balanceInput.value) : NaN;
+  const userBalance = Number.isFinite(enteredBalance) && enteredBalance > 0 ? enteredBalance : null;
 
   // Only the selected day's picks (defaults to today, steppable via the
   // date-nav arrows the same way Fixtures' are), only a real edge worth
@@ -2637,7 +2665,7 @@ function renderBets() {
     : upcoming;
 
   listEl.innerHTML = rows.length
-    ? rows.map(betCardHtml).join("")
+    ? rows.map((b) => betCardHtml(b, userBalance)).join("")
     : `<div class="empty-state">${
         state.betView === "history"
           ? "No settled bets yet."
@@ -3535,6 +3563,11 @@ document.getElementById("bet-date-filter").addEventListener("change", (e) => {
   state.betDateFilter = e.target.value;
   renderBets();
 });
+
+// Deliberately not persisted anywhere (no state field, no localStorage) -
+// this is a same-session "what would I stake with my real balance today"
+// convenience, not tracked data. It resets to blank on every page load.
+document.getElementById("bet-balance-input").addEventListener("input", () => renderBets());
 
 document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((btn) => {
   btn.addEventListener("click", () => {

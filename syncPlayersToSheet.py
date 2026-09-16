@@ -411,7 +411,7 @@ def parse_args() -> argparse.Namespace:
         help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.10 = 10%%) to count as a recommended pick",
     )
     parser.add_argument(
-        "--starting-bankroll", type=float, default=970.63,
+        "--starting-bankroll", type=float, default=1000.0,
         help=(
             "Starting bankroll for quarter-Kelly stake sizing (same currency as your odds region, "
             "e.g. GBP for --odds-region uk). Compounds with settled results over time - this only "
@@ -2131,6 +2131,35 @@ def competition_stake_multiplier(competition_id: Any) -> float:
     return COMPETITION_STAKE_MULTIPLIER.get(str(competition_id), DEFAULT_STAKE_MULTIPLIER)
 
 
+# A further discount as the picked outcome's odds get longer. Kelly sizes
+# an underdog bet off the same "edge" math as a favorite, but a long-shot
+# probability is inherently harder to calibrate well (this is the same
+# "favorite-longshot bias" well documented in real betting markets - long
+# shots are systematically over-bet relative to their true chance), so the
+# same nominal edge on a big underdog deserves less trust than it would on
+# a short-priced pick. Piecewise-linear in decimal odds: full stake through
+# modest prices, tapering down to a 0.25x floor for big underdogs. Anchor
+# points are (decimal odds, multiplier); odds at or below the first anchor
+# get that multiplier, odds at or above the last anchor get the last one.
+ODDS_STAKE_TAPER: list[tuple[float, float]] = [
+    (2.5, 1.0),
+    (4.0, 0.75),
+    (6.0, 0.5),
+    (8.0, 0.35),
+    (12.0, 0.25),
+]
+
+
+def odds_stake_multiplier(odds: float) -> float:
+    if odds <= ODDS_STAKE_TAPER[0][0]:
+        return ODDS_STAKE_TAPER[0][1]
+    for (lo_odds, lo_mult), (hi_odds, hi_mult) in zip(ODDS_STAKE_TAPER, ODDS_STAKE_TAPER[1:]):
+        if odds <= hi_odds:
+            frac = (odds - lo_odds) / (hi_odds - lo_odds)
+            return lo_mult + frac * (hi_mult - lo_mult)
+    return ODDS_STAKE_TAPER[-1][1]
+
+
 def grade_bet(recommended_pick: str, actual_result: str) -> str:
     if recommended_pick == "No Bet":
         return "No Bet"
@@ -2309,7 +2338,7 @@ def sync_bets(
                 pick_odds = float(row[col[odds_col]])
             except (TypeError, ValueError):
                 continue
-            multiplier = competition_stake_multiplier(row[col["Competition ID"]])
+            multiplier = competition_stake_multiplier(row[col["Competition ID"]]) * odds_stake_multiplier(pick_odds)
             new_stake = kelly_stake(model_pct / 100, pick_odds, bankroll, multiplier)
             new_bankroll_at_pick = round(bankroll, 2)
             if new_stake != row[col["Stake"]] or new_bankroll_at_pick != row[col["Bankroll At Pick"]]:
@@ -2384,7 +2413,7 @@ def sync_bets(
             else:
                 pick_model_pct = {"Home Win": model_h, "Draw": model_d, "Away Win": model_a}[best_pick]
                 pick_odds = float(odds_row[BET_OUTCOME_ODDS_ROW_KEY[best_pick]])
-                multiplier = competition_stake_multiplier(odds_row.get("Competition ID"))
+                multiplier = competition_stake_multiplier(odds_row.get("Competition ID")) * odds_stake_multiplier(pick_odds)
                 stake = kelly_stake(pick_model_pct / 100, pick_odds, bankroll, multiplier)
             row_values[col["Stake"]] = stake
             row_values[col["Bankroll At Pick"]] = round(bankroll, 2)
