@@ -2104,6 +2104,31 @@ KELLY_FRACTION = 0.25
 # dangerously large stake. 5% of bankroll on one bet is already a lot;
 # this is a backstop, not a target.
 MAX_STAKE_FRACTION = 0.05
+# Extra discount on top of the above, by competition tier - the model is
+# tuned and validated mainly on regular domestic league play; cup
+# competitions bring one-off knockout ties, weakened lineups/rotation, and
+# (for continental cups especially) less reliable underlying data, so a
+# picked "edge" there is less trustworthy than the same edge in a league
+# match. Primary domestic leagues (the default, 1.0) get the full stake;
+# anything not listed here also defaults to 1.0. Keyed by AutoModel's own
+# Competition ID (matchdata_competition_ids.txt), not the odds sport_key.
+COMPETITION_STAKE_MULTIPLIER: dict[str, float] = {
+    "42": 0.5,     # Champions League
+    "45": 0.5,     # CONMEBOL Libertadores (South America's Champions League)
+    "73": 0.25,    # Europa League
+    "133": 0.25,   # EFL Cup
+    "142": 0.25,   # EFL Trophy
+    "177": 0.25,   # FA Cup
+    "299": 0.25,   # CONMEBOL Sudamericana (South America's Europa League)
+    "525": 0.25,   # AFC Champions League Elite (Asia's Champions League)
+    "9469": 0.25,  # AFC Champions League Two
+    "10216": 0.25,  # Conference League
+}
+DEFAULT_STAKE_MULTIPLIER = 1.0
+
+
+def competition_stake_multiplier(competition_id: Any) -> float:
+    return COMPETITION_STAKE_MULTIPLIER.get(str(competition_id), DEFAULT_STAKE_MULTIPLIER)
 
 
 def grade_bet(recommended_pick: str, actual_result: str) -> str:
@@ -2126,7 +2151,9 @@ def bet_profit_loss(result: str, stake: float, odds: float) -> float:
     return 0.0
 
 
-def kelly_stake(model_probability: float, odds: float, bankroll: float) -> float:
+def kelly_stake(
+    model_probability: float, odds: float, bankroll: float, stake_multiplier: float = 1.0
+) -> float:
     """Quarter-Kelly stake in the same currency as `bankroll`. Full Kelly's
     fraction is f* = (p*odds - 1) / (odds - 1) - the fraction of bankroll
     that maximizes long-run geometric growth if `model_probability` is
@@ -2134,11 +2161,14 @@ def kelly_stake(model_probability: float, odds: float, bankroll: float) -> float
     which shouldn't happen once a pick has already cleared
     --bet-edge-threshold, but this is a defensive floor, not an
     assumption) and capped at MAX_STAKE_FRACTION of bankroll regardless of
-    what the raw formula suggests."""
+    what the raw formula suggests. `stake_multiplier` (see
+    COMPETITION_STAKE_MULTIPLIER) is applied after that cap, so a cup
+    match's stake is a further-discounted fraction of the same safety
+    ceiling, not a separately-capped amount."""
     if odds <= 1 or bankroll <= 0:
         return 0.0
     full_kelly_fraction = max(0.0, (model_probability * odds - 1) / (odds - 1))
-    fraction = min(full_kelly_fraction * KELLY_FRACTION, MAX_STAKE_FRACTION)
+    fraction = min(full_kelly_fraction * KELLY_FRACTION, MAX_STAKE_FRACTION) * stake_multiplier
     return round(fraction * bankroll, 2)
 
 
@@ -2279,7 +2309,8 @@ def sync_bets(
                 pick_odds = float(row[col[odds_col]])
             except (TypeError, ValueError):
                 continue
-            new_stake = kelly_stake(model_pct / 100, pick_odds, bankroll)
+            multiplier = competition_stake_multiplier(row[col["Competition ID"]])
+            new_stake = kelly_stake(model_pct / 100, pick_odds, bankroll, multiplier)
             new_bankroll_at_pick = round(bankroll, 2)
             if new_stake != row[col["Stake"]] or new_bankroll_at_pick != row[col["Bankroll At Pick"]]:
                 row[col["Stake"]] = new_stake
@@ -2353,7 +2384,8 @@ def sync_bets(
             else:
                 pick_model_pct = {"Home Win": model_h, "Draw": model_d, "Away Win": model_a}[best_pick]
                 pick_odds = float(odds_row[BET_OUTCOME_ODDS_ROW_KEY[best_pick]])
-                stake = kelly_stake(pick_model_pct / 100, pick_odds, bankroll)
+                multiplier = competition_stake_multiplier(odds_row.get("Competition ID"))
+                stake = kelly_stake(pick_model_pct / 100, pick_odds, bankroll, multiplier)
             row_values[col["Stake"]] = stake
             row_values[col["Bankroll At Pick"]] = round(bankroll, 2)
             row_values[col["Result"]] = "No Bet" if best_pick == "No Bet" else "Pending"
