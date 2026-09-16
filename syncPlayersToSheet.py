@@ -411,7 +411,7 @@ def parse_args() -> argparse.Namespace:
         help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.10 = 10%%) to count as a recommended pick",
     )
     parser.add_argument(
-        "--starting-bankroll", type=float, default=1000.0,
+        "--starting-bankroll", type=float, default=970.63,
         help=(
             "Starting bankroll for quarter-Kelly stake sizing (same currency as your odds region, "
             "e.g. GBP for --odds-region uk). Compounds with settled results over time - this only "
@@ -2085,6 +2085,12 @@ BET_OUTCOME_ODDS_COLUMN = {
 BET_OUTCOME_MODEL_PCT_COLUMN = {
     "Home Win": "Model Home %", "Draw": "Model Draw %", "Away Win": "Model Away %",
 }
+# getOdds.collect_odds() rows use its own HEADERS ("Home Odds"/"Draw Odds"/
+# "Away Odds"), not BetData's sheet column names - a separate mapping from
+# BET_OUTCOME_ODDS_COLUMN, which is keyed for BetData rows instead.
+BET_OUTCOME_ODDS_ROW_KEY = {
+    "Home Win": "Home Odds", "Draw": "Draw Odds", "Away Win": "Away Odds",
+}
 # Quarter Kelly: full Kelly is the mathematically "optimal" bankroll
 # fraction for long-run growth IF the model's probability is exactly
 # right, but real bettors almost never use it undiluted - it's brutally
@@ -2305,7 +2311,7 @@ def sync_bets(
                 stake = 0.0
             else:
                 pick_model_pct = {"Home Win": model_h, "Draw": model_d, "Away Win": model_a}[best_pick]
-                pick_odds = float(odds_row[BET_OUTCOME_ODDS_COLUMN[best_pick]])
+                pick_odds = float(odds_row[BET_OUTCOME_ODDS_ROW_KEY[best_pick]])
                 stake = kelly_stake(pick_model_pct / 100, pick_odds, bankroll)
             row_values[col["Stake"]] = stake
             row_values[col["Bankroll At Pick"]] = round(bankroll, 2)
