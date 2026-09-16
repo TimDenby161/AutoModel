@@ -71,7 +71,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Iterable, TypeVar
 
 import requests
 
@@ -411,8 +411,12 @@ def parse_args() -> argparse.Namespace:
         help="Minimum model-vs-implied-odds edge (as a fraction, e.g. 0.10 = 10%%) to count as a recommended pick",
     )
     parser.add_argument(
-        "--bet-stake-units", type=float, default=1.0,
-        help="Flat stake per recommended pick, in tracking units - this only records/tracks picks, it never places a real bet",
+        "--starting-bankroll", type=float, default=1000.0,
+        help=(
+            "Starting bankroll for quarter-Kelly stake sizing (same currency as your odds region, "
+            "e.g. GBP for --odds-region uk). Compounds with settled results over time - this only "
+            "records/tracks picks, it never places a real bet or touches a bookmaker account."
+        ),
     )
     parser.add_argument(
         "--individual-results-spreadsheet-id",
@@ -2069,10 +2073,31 @@ BET_HEADERS = [
     "Edge Home", "Edge Draw", "Edge Away",
     "Recommended Pick", "Recommended Edge",
     "Stake", "Result", "Profit/Loss", "Odds Retrieved UTC",
+    # Appended at the end, not inserted in the middle, so a sheet already
+    # populated under the pre-Kelly layout keeps every existing column's
+    # position - old rows just get a blank cell here rather than every
+    # later column silently shifting and corrupting already-written data.
+    "Bankroll At Pick",
 ]
 BET_OUTCOME_ODDS_COLUMN = {
     "Home Win": "Sky Bet Home Odds", "Draw": "Sky Bet Draw Odds", "Away Win": "Sky Bet Away Odds",
 }
+BET_OUTCOME_MODEL_PCT_COLUMN = {
+    "Home Win": "Model Home %", "Draw": "Model Draw %", "Away Win": "Model Away %",
+}
+# Quarter Kelly: full Kelly is the mathematically "optimal" bankroll
+# fraction for long-run growth IF the model's probability is exactly
+# right, but real bettors almost never use it undiluted - it's brutally
+# punishing when a probability estimate is even slightly off, and this
+# system already has known data/name-matching quirks that can occasionally
+# inflate an "edge". A quarter of full Kelly trades some growth rate for a
+# much smoother, more forgiving bankroll curve.
+KELLY_FRACTION = 0.25
+# Hard ceiling regardless of what Kelly suggests - protects against a
+# single wrong edge estimate (bad odds match, data glitch) suggesting a
+# dangerously large stake. 5% of bankroll on one bet is already a lot;
+# this is a backstop, not a target.
+MAX_STAKE_FRACTION = 0.05
 
 
 def grade_bet(recommended_pick: str, actual_result: str) -> str:
@@ -2084,14 +2109,46 @@ def grade_bet(recommended_pick: str, actual_result: str) -> str:
 
 
 def bet_profit_loss(result: str, stake: float, odds: float) -> float:
-    """Flat staking: stake * (odds - 1) if the bet won, -stake if lost, 0
-    otherwise (pending/void/no-bet). This system recommends and tracks
-    picks - it never places a real bet or touches a bookmaker account."""
+    """stake * (odds - 1) if the bet won, -stake if lost, 0 otherwise
+    (pending/void/no-bet). This system recommends and tracks picks against
+    a tracked bankroll - it never places a real bet or touches a
+    bookmaker account."""
     if result == "Won":
         return round(stake * (odds - 1), 2)
     if result == "Lost":
         return round(-stake, 2)
     return 0.0
+
+
+def kelly_stake(model_probability: float, odds: float, bankroll: float) -> float:
+    """Quarter-Kelly stake in the same currency as `bankroll`. Full Kelly's
+    fraction is f* = (p*odds - 1) / (odds - 1) - the fraction of bankroll
+    that maximizes long-run geometric growth if `model_probability` is
+    exactly correct. Clamped to >= 0 (a non-positive f* means no real edge,
+    which shouldn't happen once a pick has already cleared
+    --bet-edge-threshold, but this is a defensive floor, not an
+    assumption) and capped at MAX_STAKE_FRACTION of bankroll regardless of
+    what the raw formula suggests."""
+    if odds <= 1 or bankroll <= 0:
+        return 0.0
+    full_kelly_fraction = max(0.0, (model_probability * odds - 1) / (odds - 1))
+    fraction = min(full_kelly_fraction * KELLY_FRACTION, MAX_STAKE_FRACTION)
+    return round(fraction * bankroll, 2)
+
+
+def current_bankroll(starting_bankroll: float, rows: Iterable[list[Any]], col: dict[str, int]) -> float:
+    """Starting bankroll plus every graded (Won/Lost) bet's Profit/Loss so
+    far - Kelly stakes compound against this, the same way a real bettor's
+    stakes would grow or shrink with their actual results, not against a
+    number fixed at the start forever."""
+    total = starting_bankroll
+    for row in rows:
+        if row[col["Result"]] in ("Won", "Lost"):
+            try:
+                total += float(row[col["Profit/Loss"]] or 0)
+            except (TypeError, ValueError):
+                pass
+    return total
 
 
 def sync_bets(
@@ -2165,10 +2222,22 @@ def sync_bets(
             result = grade_bet(recommended, actual_result)
             odds_col = BET_OUTCOME_ODDS_COLUMN.get(recommended)
             odds = float(row[col[odds_col]]) if odds_col and row[col[odds_col]] not in ("", None) else 0.0
+            # The stake actually recorded on this row when the pick was
+            # made (Kelly-sized against the bankroll at that time) - not
+            # today's --starting-bankroll or today's bankroll, since a
+            # placed bet's size doesn't change after the fact.
+            stake = float(row[col["Stake"]] or 0)
             row[col["Result"]] = result
-            row[col["Profit/Loss"]] = bet_profit_loss(result, args.bet_stake_units, odds)
+            row[col["Profit/Loss"]] = bet_profit_loss(result, stake, odds)
             updates.append((row_number, row))
             settled_count += 1
+
+    # Starting bankroll plus every settlement above (and every prior run's) -
+    # new picks this run are Kelly-sized against this, so the stakes
+    # actually compound with real results instead of staying fixed forever.
+    bankroll = current_bankroll(
+        args.starting_bankroll, (row for _, row in existing_by_id.values()), col
+    )
 
     # 2. Fetch fresh odds + compute new picks for not-yet-started matches.
     appended_rows: list[list[Any]] = []
@@ -2232,7 +2301,14 @@ def sync_bets(
             row_values[col["Edge Away"]] = round(edge_a, 2)
             row_values[col["Recommended Pick"]] = best_pick
             row_values[col["Recommended Edge"]] = round(best_edge, 2)
-            row_values[col["Stake"]] = args.bet_stake_units if best_pick != "No Bet" else 0
+            if best_pick == "No Bet":
+                stake = 0.0
+            else:
+                pick_model_pct = {"Home Win": model_h, "Draw": model_d, "Away Win": model_a}[best_pick]
+                pick_odds = float(odds_row[BET_OUTCOME_ODDS_COLUMN[best_pick]])
+                stake = kelly_stake(pick_model_pct / 100, pick_odds, bankroll)
+            row_values[col["Stake"]] = stake
+            row_values[col["Bankroll At Pick"]] = round(bankroll, 2)
             row_values[col["Result"]] = "No Bet" if best_pick == "No Bet" else "Pending"
             row_values[col["Profit/Loss"]] = 0.0
             row_values[col["Odds Retrieved UTC"]] = odds_row["Odds Retrieved UTC"]

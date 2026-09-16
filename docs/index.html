@@ -851,6 +851,13 @@
       <button type="button" class="filter-chip" data-view="upcoming" aria-pressed="true">Upcoming Picks</button>
       <button type="button" class="filter-chip" data-view="history" aria-pressed="false">History</button>
     </div>
+    <div class="secondary-filters" id="bet-date-nav">
+      <div class="date-filter-group">
+        <button type="button" class="date-nav-btn" id="bet-date-prev" aria-label="Previous day">&#8249;</button>
+        <input type="date" id="bet-date-filter" class="date-filter-input" aria-label="Filter bets by date">
+        <button type="button" class="date-nav-btn" id="bet-date-next" aria-label="Next day">&#8250;</button>
+      </div>
+    </div>
     <div id="bet-summary" class="stats-summary-grid"></div>
     <div id="bet-list" class="card-list"></div>
   </section>
@@ -1020,6 +1027,7 @@ const state = {
   fixtureDateFilter: "",
   fixtureRoundFilter: "",
   betView: "upcoming",
+  betDateFilter: "",
 };
 
 const AI_FPL_ACCESS_STORAGE_KEY = "matchlabAiFplAccess";
@@ -2525,12 +2533,24 @@ function renderPercentBar(pctH, pctD, pctA, labelH, labelD, labelA) {
 // fixture card), then a second "Bookies odds" bar sized the same way from
 // the odds' implied probability, but labeled with the actual Sky Bet
 // decimal odds rather than a percentage.
+// Must match syncPlayersToSheet.py's --starting-bankroll default - used
+// here purely to show a running bankroll figure, never sent anywhere.
+const STARTING_BANKROLL = 1000;
+
+function formatGbp(n) {
+  const v = toNum(n);
+  return `${v < 0 ? "-" : ""}£${Math.abs(v).toFixed(2)}`;
+}
+
 function betCardHtml(b) {
   const isSettled = b.Result && b.Result !== "Pending" && b.Result !== "No Bet";
   const edge = toNum(b["Recommended Edge"]);
   const tier = isSettled ? betResultTier(b.Result) : betEdgeTier(edge);
   const pl = toNum(b["Profit/Loss"]);
-  const plText = isSettled && b.Result !== "Void" ? ` ${pl >= 0 ? "+" : ""}${pl.toFixed(2)}u` : "";
+  const plText = isSettled && b.Result !== "Void" ? ` ${pl >= 0 ? "+" : ""}${formatGbp(pl)}` : "";
+  const stakeLine = toNum(b.Stake) > 0
+    ? `<div class="match-card-top"><span>Stake: ${formatGbp(b.Stake)}</span></div>`
+    : "";
   const modelBar = renderPercentBar(
     toNum(b["Model Home %"]), toNum(b["Model Draw %"]), toNum(b["Model Away %"]),
     `${Math.round(toNum(b["Model Home %"]))}%`, `${Math.round(toNum(b["Model Draw %"]))}%`, `${Math.round(toNum(b["Model Away %"]))}%`
@@ -2556,6 +2576,7 @@ function betCardHtml(b) {
       </div>
       ${modelBar}
       ${oddsBar}
+      ${stakeLine}
       ${isSettled ? `<div class="match-card-top"><span>${escapeHtml(b.Result)}${plText}</span></div>` : ""}
     </div>
   `;
@@ -2569,34 +2590,41 @@ function betPerformanceSummary(settled) {
   return {
     graded: graded.length, wins, losses: graded.length - wins,
     totalPl, roi: totalStaked ? (totalPl / totalStaked) * 100 : 0,
+    bankroll: STARTING_BANKROLL + totalPl,
   };
 }
 
 function renderBets() {
   const summaryEl = document.getElementById("bet-summary");
   const listEl = document.getElementById("bet-list");
+  const dateNav = document.getElementById("bet-date-nav");
   if (!summaryEl || !listEl) return;
 
-  // Only today's picks, only a real edge worth acting on, biggest edge
-  // first - the backend itself only ever records a pick at 10%+ edge, but
-  // this filters on the number too (not just Result !== "No Bet") so any
-  // earlier data recorded under an older, lower threshold doesn't show up
-  // here alongside the ones that actually clear today's bar.
-  const today = new Date();
+  if (dateNav) dateNav.hidden = state.betView !== "upcoming";
+
+  // Only the selected day's picks (defaults to today, steppable via the
+  // date-nav arrows the same way Fixtures' are), only a real edge worth
+  // acting on, biggest edge first - the backend itself only ever records
+  // a pick at 10%+ edge, but this filters on the number too (not just
+  // Result !== "No Bet") so any earlier data recorded under an older,
+  // lower threshold doesn't show up here alongside ones that actually
+  // clear today's bar.
+  const selectedDay = parseLocalDateInput(state.betDateFilter) || new Date();
   const upcoming = state.bets
     .filter((b) => b.Result === "Pending")
     .filter((b) => toNum(b["Recommended Edge"]) > 10)
-    .filter((b) => isSameLocalDay(b.Date, today))
+    .filter((b) => isSameLocalDay(b.Date, selectedDay))
     .sort((a, b) => toNum(b["Recommended Edge"]) - toNum(a["Recommended Edge"]));
 
   const settled = state.bets.filter((b) => b.Result && b.Result !== "Pending" && b.Result !== "No Bet");
   const perf = betPerformanceSummary(settled);
 
   summaryEl.innerHTML = [
+    ["Bankroll", formatGbp(perf.bankroll)],
     ["Record", `${perf.wins}-${perf.losses}`],
     ["Win Rate", perf.graded ? `${((perf.wins / perf.graded) * 100).toFixed(1)}%` : "–"],
     ["ROI", `${perf.roi >= 0 ? "+" : ""}${perf.roi.toFixed(1)}%`],
-    ["Total P/L", `${perf.totalPl >= 0 ? "+" : ""}${perf.totalPl.toFixed(2)}u`],
+    ["Total P/L", `${perf.totalPl >= 0 ? "+" : ""}${formatGbp(perf.totalPl)}`],
   ].map(([label, value]) => `
     <div class="stats-card">
       <div class="stats-label">${label}</div>
@@ -2610,7 +2638,11 @@ function renderBets() {
 
   listEl.innerHTML = rows.length
     ? rows.map(betCardHtml).join("")
-    : `<div class="empty-state">${state.betView === "history" ? "No settled bets yet." : "No bets over 10% edge today."}</div>`;
+    : `<div class="empty-state">${
+        state.betView === "history"
+          ? "No settled bets yet."
+          : `No bets over 10% edge on ${escapeHtml(formatDateOnly(dateStrOf(selectedDay)))}.`
+      }</div>`;
 }
 
 // Sub-value under each score is the frozen pre-kickoff prediction (SnapProjH/
@@ -3482,6 +3514,27 @@ function wireDateRoundFilters(prefix, renderFn) {
   roundNext.addEventListener("click", () => stepRound(prefix, 1));
 }
 wireDateRoundFilters("fixture", renderMatches);
+
+// Bet tab's date-nav is simpler than Fixtures' (no rounds to page through),
+// so it gets its own small wiring instead of reusing wireDateRoundFilters -
+// that function requires round-filter elements to exist at all, which the
+// Bet panel deliberately doesn't have.
+function stepBetDate(direction) {
+  const current = parseLocalDateInput(state.betDateFilter) || new Date();
+  current.setDate(current.getDate() + direction);
+  const newDateStr = dateStrOf(current);
+  state.betDateFilter = newDateStr;
+  document.getElementById("bet-date-filter").value = newDateStr;
+  renderBets();
+}
+state.betDateFilter = todayDateStr();
+document.getElementById("bet-date-filter").value = state.betDateFilter;
+document.getElementById("bet-date-prev").addEventListener("click", () => stepBetDate(-1));
+document.getElementById("bet-date-next").addEventListener("click", () => stepBetDate(1));
+document.getElementById("bet-date-filter").addEventListener("change", (e) => {
+  state.betDateFilter = e.target.value;
+  renderBets();
+});
 
 document.querySelectorAll("#table-filters .filter-chip[data-filter]").forEach((btn) => {
   btn.addEventListener("click", () => {
