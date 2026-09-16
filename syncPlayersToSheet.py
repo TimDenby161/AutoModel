@@ -1321,47 +1321,35 @@ def individual_result_key(values: tuple[Any, ...]) -> tuple[str, str, str, str, 
     )
 
 
-def row_has_formula(row: list[Any]) -> bool:
-    return any(str(value).startswith("=") for value in row)
-
-
 def ensure_individual_result_formula_rows(
     destination_spreadsheet,
     destination,
     start_row: int,
     end_row: int,
 ) -> int:
+    """Copy the formula columns from the row just above start_row down
+    through end_row, unconditionally overwriting whatever's already there
+    rather than trusting it. This sheet is pre-filled with formulas
+    thousands of rows ahead of real data (created in bulk at some past
+    point, using whatever formula pattern was current then); the previous
+    version of this function skipped copying whenever a destination row
+    "already had a formula" - which every one of those pre-filled rows
+    always does, correct or not. That silently let a stale, since-fixed
+    formula pattern persist in every pre-filled row forever: each night's
+    new matches landed in the next pre-filled row and inherited whatever
+    old formula was already sitting there, un-refreshed. Since these rows
+    get real match data written into their data columns immediately after
+    this call anyway, unconditionally refreshing the formula columns from
+    the last known-good row costs nothing extra and removes that fragile
+    assumption entirely."""
     if end_row > destination.row_count:
         sheet_call(
             lambda: destination.add_rows(end_row - destination.row_count),
             description="Grow Individual Results tab",
         )
 
-    last_col = column_letters(destination.col_count)
-    formula_values = sheet_call(
-        lambda: destination.get(
-            f"A1:{last_col}{destination.row_count}",
-            value_render_option="FORMULA",
-        ),
-        description="Read Individual Results formulas",
-    )
-
-    formula_last_row = start_row - 1
-    for offset in range(start_row, min(end_row, len(formula_values)) + 1):
-        if row_has_formula(formula_values[offset - 1]):
-            formula_last_row = offset
-        else:
-            break
-
-    if formula_last_row >= end_row:
-        return 0
-
-    source_row = formula_last_row
+    source_row = start_row - 1
     if source_row < 1:
-        return 0
-
-    copy_start_row = max(formula_last_row + 1, start_row)
-    if copy_start_row > end_row:
         return 0
 
     copy_request = {
@@ -1377,7 +1365,7 @@ def ensure_individual_result_formula_rows(
                     },
                     "destination": {
                         "sheetId": destination.id,
-                        "startRowIndex": copy_start_row - 1,
+                        "startRowIndex": start_row - 1,
                         "endRowIndex": end_row,
                         "startColumnIndex": 0,
                         "endColumnIndex": destination.col_count,
@@ -1391,7 +1379,7 @@ def ensure_individual_result_formula_rows(
         lambda: destination_spreadsheet.batch_update(copy_request),
         description="Copy Individual Results formulas down",
     )
-    return end_row - copy_start_row + 1
+    return end_row - start_row + 1
 
 
 SCORE_TEXT_RE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
