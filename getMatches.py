@@ -380,6 +380,36 @@ def confirmed_out_of_scope(
     return parent is not None and parent not in keep_competition_ids
 
 
+def resolve_competition_id(
+    fetched_id: str,
+    original_id: str,
+    parent_id: str,
+    keep_competition_ids: set[str] | None,
+) -> str:
+    """matchDetails' general.leagueId (`fetched_id`) is normally the most
+    reliable Competition ID - more reliable than the lightweight per-club
+    feed's own tournament.leagueId (`original_id`) for not-yet-played
+    fixtures in particular, which is why enrich() and the round-fill step
+    both prefer it. But it can also report a match-specific "instance" ID
+    instead of the competition's real tracked one - observed on finished
+    league matches where the lightweight feed and matchDetails'
+    parentLeagueId both correctly say e.g. 48 (Championship) while
+    matchDetails' own leagueId comes back as some large, untracked-looking
+    number. When `fetched_id` isn't one of the IDs this install actually
+    tracks, prefer whichever of `original_id`/`parent_id` is, rather than
+    keeping an untracked value that would silently drop the match from
+    every scope/aggregation check keyed on Competition ID. With no tracked
+    list to validate against, the original preference (`fetched_id`) is
+    unchanged."""
+    if not keep_competition_ids or fetched_id in keep_competition_ids:
+        return fetched_id
+    if original_id in keep_competition_ids:
+        return original_id
+    if parent_id in keep_competition_ids:
+        return parent_id
+    return fetched_id
+
+
 def collect_matches(
     club_ids: list[str],
     *,
@@ -465,6 +495,19 @@ def collect_matches(
                     # instant this cached row gets rewritten.
                     reused = dict(cached[key])
                     reused["Match ID"] = int(key)
+                    # The sheet's stored Competition ID could itself already
+                    # be a wrongly-resolved instance ID from before this
+                    # validation existed (or from a run without a keep list) -
+                    # re-validate it against this run's always-fresh
+                    # lightweight fetch (`row`) every time, so a previously
+                    # wrong cached value self-heals on its own without ever
+                    # needing a fresh matchDetails fetch.
+                    reused["Competition ID"] = resolve_competition_id(
+                        str(reused.get("Competition ID", "")),
+                        str(row.get("Competition ID", "")),
+                        str(reused.get("Parent Competition ID", "")),
+                        keep_competition_ids,
+                    )
                     matches[key] = reused
                     comp_id, parent_id = str(reused.get("Competition ID", "")), reused.get("Parent Competition ID")
                     if comp_id and parent_id:
@@ -477,6 +520,12 @@ def collect_matches(
                 key, row = jobs[future]
                 try:
                     enriched = enrich(row, future.result())
+                    enriched["Competition ID"] = resolve_competition_id(
+                        str(enriched.get("Competition ID", "")),
+                        str(row.get("Competition ID", "")),
+                        str(enriched.get("Parent Competition ID", "")),
+                        keep_competition_ids,
+                    )
                     matches[key] = enriched
                     comp_id, parent_id = str(enriched.get("Competition ID", "")), enriched.get("Parent Competition ID")
                     if comp_id and parent_id:
@@ -509,7 +558,12 @@ def collect_matches(
                     # fixtures - matchDetails' general.leagueId is the same
                     # reliable field enrich() already trusts for finished
                     # matches, so prefer it here too whenever it's available.
-                    row["Competition ID"] = cached_row.get("Competition ID") or row.get("Competition ID", "")
+                    row["Competition ID"] = resolve_competition_id(
+                        str(cached_row.get("Competition ID", "")),
+                        str(row.get("Competition ID", "")),
+                        str(cached_row.get("Parent Competition ID", "")),
+                        keep_competition_ids,
+                    ) or row.get("Competition ID", "")
                     row["Parent Competition ID"] = row.get("Parent Competition ID") or cached_row.get("Parent Competition ID", "")
                     row["Country Code"] = row.get("Country Code") or cached_row.get("Country Code", "")
                     row["Gender"] = row.get("Gender") or cached_row.get("Gender", "")
@@ -527,7 +581,12 @@ def collect_matches(
                 try:
                     general = future.result().get("general") or {}
                     row["Round"] = general.get("matchRound", "")
-                    row["Competition ID"] = general.get("leagueId") or row.get("Competition ID", "")
+                    row["Competition ID"] = resolve_competition_id(
+                        str(general.get("leagueId") or ""),
+                        str(row.get("Competition ID", "")),
+                        str(general.get("parentLeagueId") or ""),
+                        keep_competition_ids,
+                    ) or row.get("Competition ID", "")
                     row["Parent Competition ID"] = row.get("Parent Competition ID") or general.get("parentLeagueId", "")
                     row["Country Code"] = row.get("Country Code") or general.get("countryCode", "")
                     row["Gender"] = row.get("Gender") or general.get("gender", "")
